@@ -354,29 +354,30 @@ export function setLayerVisible(prefix, visible) {
 }
 
 export function setAircraft(position) {
-  if (!map || !position) return;
-  if (!aircraftMarker) {
-    const el = document.createElement("div");
-    el.className = "aircraft-marker";
+  const lon = Number(position?.lon);
+  const lat = Number(position?.lat);
+  const heading = Number.isFinite(Number(position?.heading))
+    ? Number(position.heading)
+    : 0;
 
-    // MapLibre owns the outer marker transform. Never overwrite it with the
-    // aircraft heading, otherwise every telemetry update can break positioning.
-    const icon = document.createElement("div");
-    icon.className = "aircraft-icon";
-    el.appendChild(icon);
-
-    aircraftMarker = new maplibregl.Marker({
-      element: el,
-      rotationAlignment: "map",
-      pitchAlignment: "map"
-    }).setLngLat([position.lon, position.lat]).addTo(map);
-
-    aircraftMarker._avimapIcon = icon;
+  // Never pass NaN/undefined into MapLibre. SimConnect can briefly emit
+  // incomplete values while the connection is initialising.
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) ||
+      lon < -180 || lon > 180 || lat < -90 || lat > 90) {
+    return false;
   }
 
-  aircraftMarker.setLngLat([position.lon, position.lat]);
-  aircraftMarker._avimapIcon.style.transform =
-    `rotate(${position.heading || 0}deg)`;
+  if (!aircraftMarker) {
+    aircraftMarker = new maplibregl.Marker({ element: createAircraftElement() })
+      .setLngLat([lon, lat])
+      .addTo(map);
+  } else {
+    aircraftMarker.setLngLat([lon, lat]);
+  }
+
+  const icon = aircraftMarker.getElement().querySelector(".aircraft-icon");
+  if (icon) icon.style.transform = `rotate(${heading}deg)`;
+  return true;
 }
 
 export function centerOn(position) {

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Airspace loader now supports GeoJSON, ND-GeoJSON, JSON response objects and XML fallback, with explicit diagnostics."
+  "releaseNotes": "Fixed GitHub Pages CORS by serving UK airspace from the AviMap repository via GitHub Actions; ignored incomplete MSFS telemetry instead of passing NaN to MapLibre."
 }

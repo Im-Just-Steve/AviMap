@@ -154,3 +154,23 @@ It also handles JSON response wrappers such as `items`, `data`, `results`,
 
 The browser console now reports which export actually supplied the features,
 or why each source failed.
+
+
+## v1.0.6: CORS and telemetry fix
+
+The browser cannot directly fetch the OpenAIP Google Cloud Storage export from
+GitHub Pages because that bucket does not return an
+`Access-Control-Allow-Origin` header for the AviMap origin. The browser
+console confirmed this.
+
+AviMap v1.0.6 therefore does **not** fetch OpenAIP airspace from the browser.
+A GitHub Actions job downloads the UK airspace export server-side and stores
+it as `data/uk-airspace.geojson`. The PWA then loads that local repository file
+with the same origin as the app.
+
+OpenAIP documents the country/object export naming convention, including
+`gb_asp.geojson` for Great Britain airspace. citeturn0search0
+
+The MSFS telemetry path is also hardened: incomplete latitude/longitude
+values are ignored rather than passed to MapLibre, which was causing the
+repeated `Invalid LngLat object: (NaN, NaN)` errors.
