@@ -61,20 +61,17 @@ jobs:
 
           USER_AGENT = "AviMap-NATS-Data-Updater/1.0"
 
-
           CHECKLIST_BASE = (
               "https://nats-uk.ead-it.com/"
               "cms-nats/opencms/en/Publications/"
               "digital-datasets/Checklists/"
           )
 
-
           INDEX_URL = (
               "https://nats-uk.ead-it.com/"
               "cms-nats/opencms/en/Publications/"
               "digital-datasets/index.html"
           )
-
 
           today = datetime.now(
               timezone.utc
@@ -298,11 +295,6 @@ jobs:
           checklist_url = None
 
 
-          print(
-              "Searching NATS Dataset Checklists..."
-          )
-
-
           for offset in range(90):
 
               candidate_date = (
@@ -376,10 +368,7 @@ jobs:
 
 
           print(
-              "Checklist:"
-          )
-
-          print(
+              "Checklist:",
               checklist_url
           )
 
@@ -389,10 +378,6 @@ jobs:
               errors="replace"
           )
 
-
-          # --------------------------------------------------------
-          # AIP AIRAC
-          # --------------------------------------------------------
 
           aip_matches = re.findall(
               r"EG_AIP_DS_FULL_(\d{8})\.XML",
@@ -440,10 +425,6 @@ jobs:
               key=lambda item: item[0]
           )
 
-
-          # --------------------------------------------------------
-          # VRP AIRAC
-          # --------------------------------------------------------
 
           vrp_matches = re.findall(
               r"EG_VRP_DS_AREA1_FULL_(\d{8})\.CSV",
@@ -504,10 +485,6 @@ jobs:
           )
 
 
-          # --------------------------------------------------------
-          # LINKS
-          # --------------------------------------------------------
-
           checklist_links = parse_links(
               checklist_url,
               checklist_body
@@ -528,10 +505,7 @@ jobs:
           except Exception as exc:
 
               print(
-                  "WARNING: Digital dataset index unavailable:"
-              )
-
-              print(
+                  "WARNING: dataset index unavailable:",
                   exc
               )
 
@@ -540,7 +514,6 @@ jobs:
 
           aip_links = []
           vrp_links = []
-
           seen = set()
 
 
@@ -584,10 +557,6 @@ jobs:
                   )
 
 
-          # --------------------------------------------------------
-          # FOLLOW DATASET PAGES
-          # --------------------------------------------------------
-
           for url, text in list(
               aip_links
           ):
@@ -596,17 +565,11 @@ jobs:
 
 
               if not (
-                  lower.endswith(
-                      ".html"
-                  )
+                  lower.endswith(".html")
                   or
-                  lower.endswith(
-                      ".htm"
-                  )
+                  lower.endswith(".htm")
                   or
-                  lower.endswith(
-                      "/"
-                  )
+                  lower.endswith("/")
               ):
 
                   continue
@@ -717,12 +680,10 @@ jobs:
 
           print("")
           print(
-              "NATS AIP download candidates:"
+              "AIP candidates:"
           )
 
-
           for url, text in aip_links:
-
               print(
                   text,
                   "=>",
@@ -732,12 +693,10 @@ jobs:
 
           print("")
           print(
-              "NATS VRP download candidates:"
+              "VRP candidates:"
           )
 
-
           for url, text in vrp_links:
-
               print(
                   text,
                   "=>",
@@ -748,14 +707,14 @@ jobs:
           if not aip_links:
 
               raise SystemExit(
-                  "ERROR: No NATS AIP download href found."
+                  "ERROR: No AIP download candidate found."
               )
 
 
           if not vrp_links:
 
               raise SystemExit(
-                  "ERROR: No NATS VRP download href found."
+                  "ERROR: No VRP download candidate found."
               )
 
           PY
@@ -765,7 +724,7 @@ jobs:
       # DOWNLOAD AIP
       # ============================================================
 
-      - name: Download NATS AIP dataset
+      - name: Download NATS AIP
         run: |
           set -euo pipefail
 
@@ -782,7 +741,7 @@ jobs:
 
 
             echo ""
-            echo "Testing NATS AIP URL:"
+            echo "Testing:"
             echo "${URL}"
 
 
@@ -830,7 +789,7 @@ jobs:
 
 
               echo ""
-              echo "AIP archive contents:"
+              echo "AIP archive:"
 
               find \
                 /tmp/nats-aip \
@@ -871,8 +830,7 @@ jobs:
 
           if [ -z "${FOUND}" ]; then
 
-            echo ""
-            echo "ERROR: NATS AIP download failed."
+            echo "ERROR: AIP download failed."
 
             exit 1
 
@@ -905,7 +863,7 @@ jobs:
       # DOWNLOAD VRP
       # ============================================================
 
-      - name: Download NATS VRP dataset
+      - name: Download NATS VRP
         run: |
           set -euo pipefail
 
@@ -922,7 +880,7 @@ jobs:
 
 
             echo ""
-            echo "Testing NATS VRP URL:"
+            echo "Testing:"
             echo "${URL}"
 
 
@@ -969,15 +927,6 @@ jobs:
                 -d /tmp/nats-vrp
 
 
-              echo ""
-              echo "VRP archive contents:"
-
-              find \
-                /tmp/nats-vrp \
-                -type f \
-                -print
-
-
               VRP_CSV=$(
                 find \
                   /tmp/nats-vrp \
@@ -1011,8 +960,7 @@ jobs:
 
           if [ -z "${FOUND}" ]; then
 
-            echo ""
-            echo "ERROR: NATS VRP download failed."
+            echo "ERROR: VRP download failed."
 
             exit 1
 
@@ -1024,32 +972,21 @@ jobs:
           echo "${FOUND}"
 
 
-          ls -lh \
-            /tmp/uk-vrps.csv
-
-
-          echo ""
-          echo "VRP first 10 lines:"
-
           head \
             -n 10 \
             /tmp/uk-vrps.csv
 
 
       # ============================================================
-      # IMPORT EVERY NATS AIRSPACE FEATURE
+      # AIXM → GEOJSON
       #
-      # IMPORTANT:
+      # NO AIRSPACE FILTERING.
       #
-      # THERE IS NO AIRSPACE CLASSIFICATION FILTER HERE.
-      #
-      # EVERY AIXM Airspace FEATURE IS RETAINED.
-      #
-      # If geometry cannot be resolved, the feature is still written
-      # with geometry:null so that NOTHING is silently discarded.
+      # The purpose of this converter is to faithfully reconstruct
+      # the horizontal geometry contained in NATS AIXM.
       # ============================================================
 
-      - name: Import ALL NATS airspace
+      - name: Convert ALL NATS AIXM airspace
         run: |
           set -euo pipefail
 
@@ -1063,6 +1000,7 @@ jobs:
           import re
           import xml.etree.ElementTree as ET
 
+          from collections import Counter
           from pathlib import Path
 
 
@@ -1070,12 +1008,10 @@ jobs:
               "/tmp/uk-aip.xml"
           )
 
-
           OUTPUT_FILE = (
               "/tmp/avimap-data/"
               "uk-airspace.geojson"
           )
-
 
           AIRAC = Path(
               "/tmp/nats-aip-date.txt"
@@ -1084,6 +1020,10 @@ jobs:
           ).strip()
 
 
+          # ========================================================
+          # XML
+          # ========================================================
+
           tree = ET.parse(
               XML_FILE
           )
@@ -1091,13 +1031,7 @@ jobs:
           root = tree.getroot()
 
 
-          # ========================================================
-          # XML HELPERS
-          # ========================================================
-
-          def local(
-              tag
-          ):
+          def local(tag):
 
               return tag.rsplit(
                   "}",
@@ -1129,13 +1063,6 @@ jobs:
               return None
 
 
-          # ========================================================
-          # BUILD GLOBAL XML ID INDEX
-          # ========================================================
-
-          xml_id_index = {}
-
-
           parent_map = {}
 
 
@@ -1148,38 +1075,39 @@ jobs:
                   ] = parent
 
 
+          id_index = {}
+
+
           for element in root.iter():
 
               for key, value in element.attrib.items():
 
-                  if (
-                      local(
-                          key
-                      ).lower()
-                      in {
-                          "id",
-                          "uuid"
-                      }
-                      and
-                      value
-                  ):
+                  lname = local(
+                      key
+                  ).lower()
 
-                      xml_id_index[
+
+                  if lname in {
+                      "id",
+                      "uuid"
+                  } and value:
+
+                      id_index[
                           value.lstrip("#")
                       ] = element
 
 
           print("")
           print(
-              "XML indexed objects:",
+              "Indexed XML objects:",
               len(
-                  xml_id_index
+                  id_index
               )
           )
 
 
           # ========================================================
-          # XLink RESOLUTION
+          # XLink
           # ========================================================
 
           def href_target(
@@ -1190,17 +1118,22 @@ jobs:
                   return None
 
 
-              href = (
-                  attr_local(
-                      element,
+              href = None
+
+
+              for key, value in element.attrib.items():
+
+                  if (
+                      local(
+                          key
+                      ).lower()
+                      ==
                       "href"
-                  )
-                  or
-                  attr_local(
-                      element,
-                      "xlink:href"
-                  )
-              )
+                  ):
+
+                      href = value
+
+                      break
 
 
               if not href:
@@ -1217,14 +1150,14 @@ jobs:
                   return None
 
 
-              return xml_id_index.get(
+              return id_index.get(
                   reference
               )
 
 
-          def resolved_chain(
+          def resolve_chain(
               element,
-              maximum=25
+              maximum=40
           ):
 
               result = []
@@ -1255,6 +1188,7 @@ jobs:
                       marker
                   )
 
+
                   result.append(
                       current
                   )
@@ -1276,10 +1210,10 @@ jobs:
 
 
           # ========================================================
-          # COORDINATE HELPERS
+          # COORDINATES
           # ========================================================
 
-          def srs_name(
+          def inherited_srs(
               element
           ):
 
@@ -1287,7 +1221,7 @@ jobs:
 
 
               for _ in range(
-                  40
+                  50
               ):
 
                   if current is None:
@@ -1312,7 +1246,7 @@ jobs:
               return "EPSG:4326"
 
 
-          def srs_dimension(
+          def dimension(
               element
           ):
 
@@ -1346,7 +1280,7 @@ jobs:
                   return 2
 
 
-          def numbers(
+          def parse_numbers(
               text
           ):
 
@@ -1382,79 +1316,7 @@ jobs:
               return result
 
 
-          def coordinate_pairs(
-              element,
-              text
-          ):
-
-              values = numbers(
-                  text
-              )
-
-
-              dimension = srs_dimension(
-                  element
-              )
-
-
-              result = []
-
-
-              for offset in range(
-                  0,
-                  len(values),
-                  dimension
-              ):
-
-                  point = values[
-                      offset:
-                      offset + dimension
-                  ]
-
-
-                  if len(point) < 2:
-                      continue
-
-
-                  x = point[0]
-                  y = point[1]
-
-
-                  srs = srs_name(
-                      element
-                  ).upper()
-
-
-                  # AIXM datasets are normally EPSG:4326.
-                  # EPSG:4326 uses latitude/longitude ordering,
-                  # whereas GeoJSON requires longitude/latitude.
-                  if (
-                      "4326" in srs
-                      and
-                      "CRS84" not in srs
-                  ):
-
-                      result.append(
-                          [
-                              y,
-                              x
-                          ]
-                      )
-
-                  else:
-
-                      result.append(
-                          [
-                              x,
-                              y
-                          ]
-                      )
-
-
-              return result
-
-
-          def direct_points(
+          def positions(
               element
           ):
 
@@ -1468,18 +1330,114 @@ jobs:
                   )
 
 
-                  if name in {
-                      "posList",
-                      "pos"
-                  }:
+                  if name == "posList":
 
-                      if node.text:
+                      if not node.text:
+                          continue
 
-                          result.extend(
-                              coordinate_pairs(
-                                  node,
-                                  node.text
+
+                      values = parse_numbers(
+                          node.text
+                      )
+
+
+                      dim = dimension(
+                          node
+                      )
+
+
+                      for i in range(
+                          0,
+                          len(values),
+                          dim
+                      ):
+
+                          point = values[
+                              i:
+                              i + dim
+                          ]
+
+
+                          if len(point) < 2:
+                              continue
+
+
+                          first = point[0]
+                          second = point[1]
+
+
+                          srs = inherited_srs(
+                              node
+                          ).upper()
+
+
+                          if (
+                              "4326" in srs
+                              and
+                              "CRS84" not in srs
+                          ):
+
+                              result.append(
+                                  [
+                                      second,
+                                      first
+                                  ]
                               )
+
+                          else:
+
+                              result.append(
+                                  [
+                                      first,
+                                      second
+                                  ]
+                              )
+
+
+                  elif name == "pos":
+
+                      if not node.text:
+                          continue
+
+
+                      values = parse_numbers(
+                          node.text
+                      )
+
+
+                      if len(values) < 2:
+                          continue
+
+
+                      first = values[0]
+                      second = values[1]
+
+
+                      srs = inherited_srs(
+                          node
+                      ).upper()
+
+
+                      if (
+                          "4326" in srs
+                          and
+                          "CRS84" not in srs
+                      ):
+
+                          result.append(
+                              [
+                                  second,
+                                  first
+                              ]
+                          )
+
+                      else:
+
+                          result.append(
+                              [
+                                  first,
+                                  second
+                              ]
                           )
 
 
@@ -1494,23 +1452,23 @@ jobs:
                           node.text.strip()
                       ):
 
-                          parts = token.split(
+                          bits = token.split(
                               ","
                           )
 
 
-                          if len(parts) < 2:
+                          if len(bits) < 2:
                               continue
 
 
                           try:
 
-                              x = float(
-                                  parts[0]
+                              first = float(
+                                  bits[0]
                               )
 
-                              y = float(
-                                  parts[1]
+                              second = float(
+                                  bits[1]
                               )
 
                           except ValueError:
@@ -1518,7 +1476,7 @@ jobs:
                               continue
 
 
-                          srs = srs_name(
+                          srs = inherited_srs(
                               node
                           ).upper()
 
@@ -1531,8 +1489,8 @@ jobs:
 
                               result.append(
                                   [
-                                      y,
-                                      x
+                                      second,
+                                      first
                                   ]
                               )
 
@@ -1540,8 +1498,8 @@ jobs:
 
                               result.append(
                                   [
-                                      x,
-                                      y
+                                      first,
+                                      second
                                   ]
                               )
 
@@ -1550,707 +1508,10 @@ jobs:
 
 
           # ========================================================
-          # CURVE / ARC SUPPORT
+          # ANGLES / RADIUS
           # ========================================================
 
-          def radius_metres(
-              element
-          ):
-
-              for node in element.iter():
-
-                  if local(
-                      node.tag
-                  ) != "radius":
-                      continue
-
-
-                  if not node.text:
-                      return None
-
-
-                  try:
-
-                      radius = float(
-                          node.text.strip()
-                      )
-
-                  except ValueError:
-
-                      return None
-
-
-                  unit = (
-                      attr_local(
-                          node,
-                          "uom"
-                      )
-                      or
-                      "m"
-                  ).lower()
-
-
-                  if unit in {
-                      "km",
-                      "kilometre",
-                      "kilometres",
-                      "kilometer",
-                      "kilometers"
-                  }:
-
-                      radius *= 1000.0
-
-
-                  elif unit in {
-                      "nm",
-                      "nmi",
-                      "[nmi_i]"
-                  }:
-
-                      radius *= 1852.0
-
-
-                  return radius
-
-
-              return None
-
-
-          def angle_value(
-              element,
-              name
-          ):
-
-              for node in element.iter():
-
-                  if (
-                      local(
-                          node.tag
-                      )
-                      ==
-                      name
-                      and
-                      node.text
-                  ):
-
-                      try:
-
-                          return float(
-                              node.text.strip()
-                          )
-
-                      except ValueError:
-
-                          return None
-
-
-              return None
-
-
-          def arc_points(
-              element
-          ):
-
-              center = None
-
-
-              for node in element.iter():
-
-                  if (
-                      local(
-                          node.tag
-                      )
-                      ==
-                      "pos"
-                      and
-                      node.text
-                  ):
-
-                      points = coordinate_pairs(
-                          node,
-                          node.text
-                      )
-
-
-                      if points:
-
-                          center = points[0]
-
-
-                      break
-
-
-              if center is None:
-                  return []
-
-
-              radius = radius_metres(
-                  element
-              )
-
-
-              if radius is None:
-                  return []
-
-
-              start = angle_value(
-                  element,
-                  "startAngle"
-              )
-
-
-              end = angle_value(
-                  element,
-                  "endAngle"
-              )
-
-
-              if (
-                  start is None
-                  or
-                  end is None
-              ):
-
-                  return []
-
-
-              delta = (
-                  end -
-                  start
-              )
-
-
-              if delta == 0:
-                  delta = 360.0
-
-
-              while delta > 360.0:
-                  delta -= 360.0
-
-
-              while delta < -360.0:
-                  delta += 360.0
-
-
-              steps = min(
-                  180,
-                  max(
-                      8,
-                      int(
-                          abs(
-                              delta
-                          )
-                          /
-                          4.0
-                      )
-                  )
-              )
-
-
-              points = []
-
-
-              for i in range(
-                  steps + 1
-              ):
-
-                  fraction = (
-                      i /
-                      steps
-                  )
-
-
-                  angle = math.radians(
-                      start +
-                      (
-                          delta *
-                          fraction
-                      )
-                  )
-
-
-                  latitude = (
-                      center[1]
-                      +
-                      (
-                          radius
-                          *
-                          math.sin(
-                              angle
-                          )
-                          /
-                          111320.0
-                      )
-                  )
-
-
-                  longitude = (
-                      center[0]
-                      +
-                      (
-                          radius
-                          *
-                          math.cos(
-                              angle
-                          )
-                          /
-                          (
-                              111320.0
-                              *
-                              max(
-                                  0.05,
-                                  math.cos(
-                                      math.radians(
-                                          latitude
-                                      )
-                                  )
-                              )
-                          )
-                      )
-                  )
-
-
-                  points.append(
-                      [
-                          longitude,
-                          latitude
-                      ]
-                  )
-
-
-              return points
-
-
-          # ========================================================
-          # CURVE SEGMENT EXTRACTION
-          # ========================================================
-
-          def curve_segment_points(
-              element,
-              seen=None
-          ):
-
-              if seen is None:
-                  seen = set()
-
-
-              if element is None:
-                  return []
-
-
-              marker = id(
-                  element
-              )
-
-
-              if marker in seen:
-                  return []
-
-
-              seen.add(
-                  marker
-              )
-
-
-              chain = resolved_chain(
-                  element
-              )
-
-
-              if not chain:
-                  return []
-
-
-              target = chain[-1]
-
-
-              name = local(
-                  target.tag
-              )
-
-
-              if name in {
-                  "ArcByCenterPoint",
-                  "CircleByCenterPoint"
-              }:
-
-                  points = arc_points(
-                      target
-                  )
-
-
-                  if (
-                      name
-                      ==
-                      "CircleByCenterPoint"
-                      and
-                      points
-                      and
-                      points[0]
-                      !=
-                      points[-1]
-                  ):
-
-                      points.append(
-                          points[0]
-                      )
-
-
-                  return points
-
-
-              if name in {
-                  "LineStringSegment",
-                  "GeodesicString",
-                  "Geodesic",
-                  "ArcStringByBulge",
-                  "Arc",
-                  "ArcString",
-                  "Circle"
-              }:
-
-                  return direct_points(
-                      target
-                  )
-
-
-              result = []
-
-
-              for child in target.iter():
-
-                  if local(
-                      child.tag
-                  ) in {
-                      "LineStringSegment",
-                      "GeodesicString",
-                      "Geodesic",
-                      "ArcStringByBulge",
-                      "Arc",
-                      "ArcString",
-                      "Circle",
-                      "ArcByCenterPoint",
-                      "CircleByCenterPoint"
-                  }:
-
-                      result.extend(
-                          curve_segment_points(
-                              child,
-                              seen
-                          )
-                      )
-
-
-              if result:
-                  return result
-
-
-              return direct_points(
-                  target
-              )
-
-
-          # ========================================================
-          # RING EXTRACTION
-          # ========================================================
-
-          def ring_points(
-              ring
-          ):
-
-              chain = resolved_chain(
-                  ring
-              )
-
-
-              if not chain:
-                  return []
-
-
-              target = chain[-1]
-
-
-              direct = direct_points(
-                  target
-              )
-
-
-              if len(direct) >= 4:
-
-                  if (
-                      direct[0]
-                      !=
-                      direct[-1]
-                  ):
-
-                      direct.append(
-                          direct[0]
-                      )
-
-
-                  return direct
-
-
-              result = []
-
-
-              for node in target.iter():
-
-                  if local(
-                      node.tag
-                  ) != "curveMember":
-                      continue
-
-
-                  result.extend(
-                      curve_segment_points(
-                          node
-                      )
-                  )
-
-
-              cleaned = []
-
-
-              for point in result:
-
-                  if (
-                      not cleaned
-                      or
-                      point
-                      !=
-                      cleaned[-1]
-                  ):
-
-                      cleaned.append(
-                          point
-                      )
-
-
-              if len(cleaned) >= 3:
-
-                  if (
-                      cleaned[0]
-                      !=
-                      cleaned[-1]
-                  ):
-
-                      cleaned.append(
-                          cleaned[0]
-                      )
-
-
-                  return cleaned
-
-
-              return []
-
-
-          # ========================================================
-          # SURFACE EXTRACTION
-          # ========================================================
-
-          def surface_objects(
-              airspace
-          ):
-
-              result = []
-
-              seen = set()
-
-
-              # First collect any Surface directly contained
-              # in the Airspace feature.
-
-              candidates = [
-                  airspace
-              ]
-
-
-              # Also follow every href occurring anywhere below
-              # the Airspace feature. This is important because
-              # AIXM geometry may be stored by reference.
-
-              for node in airspace.iter():
-
-                  target = href_target(
-                      node
-                  )
-
-
-                  if target is not None:
-
-                      candidates.append(
-                          target
-                      )
-
-
-              # Walk all candidates recursively.
-
-              for candidate in candidates:
-
-                  for node in (
-                      [candidate]
-                      +
-                      list(
-                          candidate.iter()
-                      )
-                  ):
-
-                      chain = resolved_chain(
-                          node
-                      )
-
-
-                      for item in chain:
-
-                          name = local(
-                              item.tag
-                          )
-
-
-                          if name not in {
-                              "Surface",
-                              "CompositeSurface"
-                          }:
-
-                              continue
-
-
-                          marker = id(
-                              item
-                          )
-
-
-                          if marker in seen:
-                              continue
-
-
-                          seen.add(
-                              marker
-                          )
-
-                          result.append(
-                              item
-                          )
-
-
-              return result
-
-
-          # ========================================================
-          # POLYGON EXTRACTION
-          # ========================================================
-
-          def polygons_for_airspace(
-              airspace
-          ):
-
-              polygons = []
-
-
-              for surface in surface_objects(
-                  airspace
-              ):
-
-                  for patch in surface.iter():
-
-                      if local(
-                          patch.tag
-                      ) != "PolygonPatch":
-                          continue
-
-
-                      exterior_ring = None
-                      interior_rings = []
-
-
-                      for node in patch.iter():
-
-                          name = local(
-                              node.tag
-                          )
-
-
-                          if name == "exterior":
-
-                              for ring in node.iter():
-
-                                  if local(
-                                      ring.tag
-                                  ) in {
-                                      "LinearRing",
-                                      "Ring"
-                                  }:
-
-                                      exterior_ring = ring
-
-                                      break
-
-
-                          elif name == "interior":
-
-                              for ring in node.iter():
-
-                                  if local(
-                                      ring.tag
-                                  ) in {
-                                      "LinearRing",
-                                      "Ring"
-                                  }:
-
-                                      points = ring_points(
-                                          ring
-                                      )
-
-
-                                      if len(
-                                          points
-                                      ) >= 4:
-
-                                          interior_rings.append(
-                                              points
-                                          )
-
-
-                                      break
-
-
-                      if exterior_ring is None:
-                          continue
-
-
-                      outer = ring_points(
-                          exterior_ring
-                      )
-
-
-                      if len(
-                          outer
-                      ) < 4:
-
-                          continue
-
-
-                      polygons.append(
-                          [
-                              outer
-                          ]
-                          +
-                          interior_rings
-                      )
-
-
-              return polygons
-
-
-          # ========================================================
-          # AIRSPACE PROPERTY EXTRACTION
-          #
-          # NO CLASSIFICATION IS PERFORMED.
-          # ========================================================
-
-          def first_value(
+          def numeric_value(
               element,
               names
           ):
@@ -2272,10 +1533,1026 @@ jobs:
                       node.text
                   ):
 
+                      try:
+
+                          return float(
+                              node.text.strip()
+                          )
+
+                      except ValueError:
+
+                          continue
+
+
+              return None
+
+
+          def radius_metres(
+              element
+          ):
+
+              radius_node = None
+
+
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) == "radius":
+
+                      radius_node = node
+
+                      break
+
+
+              if radius_node is None:
+                  return None
+
+
+              if not radius_node.text:
+                  return None
+
+
+              try:
+
+                  radius = float(
+                      radius_node.text.strip()
+                  )
+
+              except ValueError:
+
+                  return None
+
+
+              unit = (
+                  attr_local(
+                      radius_node,
+                      "uom"
+                  )
+                  or
+                  "m"
+              ).lower()
+
+
+              if unit in {
+                  "km",
+                  "kilometre",
+                  "kilometres",
+                  "kilometer",
+                  "kilometers"
+              }:
+
+                  radius *= 1000.0
+
+
+              elif unit in {
+                  "nm",
+                  "nmi",
+                  "[nmi_i]"
+              }:
+
+                  radius *= 1852.0
+
+
+              return radius
+
+
+          # ========================================================
+          # AIXM ARC
+          #
+          # AIXM bearings are clockwise from true north.
+          #
+          # Therefore:
+          #
+          # latitude  = centre + north/south component
+          # longitude = centre + east/west component
+          #
+          # 0 degrees = north
+          # 90 degrees = east
+          # 180 degrees = south
+          # 270 degrees = west
+          # ========================================================
+
+          def arc_by_center_points(
+              element
+          ):
+
+              center = None
+
+
+              # Find the actual centre position.
+
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "pos":
+
+                      continue
+
+
+                  points = positions(
+                      node
+                  )
+
+
+                  if points:
+
+                      center = points[0]
+
+                      break
+
+
+              if center is None:
+
+                  return []
+
+
+              radius = radius_metres(
+                  element
+              )
+
+
+              if radius is None:
+
+                  return []
+
+
+              start = numeric_value(
+                  element,
+                  {
+                      "startAngle"
+                  }
+              )
+
+
+              end = numeric_value(
+                  element,
+                  {
+                      "endAngle"
+                  }
+              )
+
+
+              if (
+                  start is None
+                  or
+                  end is None
+              ):
+
+                  return []
+
+
+              # AIXM arc is clockwise from north.
+
+              sweep = (
+                  end -
+                  start
+              )
+
+
+              # Avoid producing a zero-length arc.
+
+              if abs(
+                  sweep
+              ) < 0.000001:
+
+                  sweep = 360.0
+
+
+              # Keep the actual encoded direction.
+
+              steps = max(
+                  8,
+                  min(
+                      720,
+                      int(
+                          abs(
+                              sweep
+                          )
+                          /
+                          2.0
+                      )
+                  )
+              )
+
+
+              result = []
+
+
+              for i in range(
+                  steps + 1
+              ):
+
+                  fraction = (
+                      i /
+                      steps
+                  )
+
+
+                  bearing = (
+                      start
+                      +
+                      (
+                          sweep
+                          *
+                          fraction
+                      )
+                  )
+
+
+                  radians = math.radians(
+                      bearing
+                  )
+
+
+                  lat0 = center[1]
+
+
+                  lon0 = center[0]
+
+
+                  # North/south component.
+
+                  delta_lat = (
+                      radius
+                      *
+                      math.cos(
+                          radians
+                      )
+                      /
+                      111320.0
+                  )
+
+
+                  latitude = (
+                      lat0
+                      +
+                      delta_lat
+                  )
+
+
+                  # East/west component.
+
+                  metres_per_degree_lon = (
+                      111320.0
+                      *
+                      max(
+                          0.01,
+                          math.cos(
+                              math.radians(
+                                  lat0
+                              )
+                          )
+                      )
+                  )
+
+
+                  delta_lon = (
+                      radius
+                      *
+                      math.sin(
+                          radians
+                      )
+                      /
+                      metres_per_degree_lon
+                  )
+
+
+                  longitude = (
+                      lon0
+                      +
+                      delta_lon
+                  )
+
+
+                  result.append(
+                      [
+                          longitude,
+                          latitude
+                      ]
+                  )
+
+
+              return result
+
+
+          # ========================================================
+          # CIRCLE
+          # ========================================================
+
+          def circle_points(
+              element
+          ):
+
+              radius = radius_metres(
+                  element
+              )
+
+
+              if radius is None:
+                  return []
+
+
+              center = None
+
+
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "pos":
+
+                      continue
+
+
+                  points = positions(
+                      node
+                  )
+
+
+                  if points:
+
+                      center = points[0]
+
+                      break
+
+
+              if center is None:
+
+                  return []
+
+
+              points = []
+
+
+              # 360 degrees, clockwise from north.
+
+              steps = 144
+
+
+              for i in range(
+                  steps + 1
+              ):
+
+                  bearing = (
+                      i
+                      *
+                      360.0
+                      /
+                      steps
+                  )
+
+
+                  radians = math.radians(
+                      bearing
+                  )
+
+
+                  lat0 = center[1]
+                  lon0 = center[0]
+
+
+                  latitude = (
+                      lat0
+                      +
+                      (
+                          radius
+                          *
+                          math.cos(
+                              radians
+                          )
+                          /
+                          111320.0
+                      )
+                  )
+
+
+                  metres_per_degree_lon = (
+                      111320.0
+                      *
+                      max(
+                          0.01,
+                          math.cos(
+                              math.radians(
+                                  lat0
+                              )
+                          )
+                      )
+                  )
+
+
+                  longitude = (
+                      lon0
+                      +
+                      (
+                          radius
+                          *
+                          math.sin(
+                              radians
+                          )
+                          /
+                          metres_per_degree_lon
+                      )
+                  )
+
+
+                  points.append(
+                      [
+                          longitude,
+                          latitude
+                      ]
+                  )
+
+
+              return points
+
+
+          # ========================================================
+          # CURVE SEGMENTS
+          # ========================================================
+
+          def curve_segments(
+              curve,
+              seen=None
+          ):
+
+              if seen is None:
+                  seen = set()
+
+
+              curve = (
+                  resolve_chain(
+                      curve
+                  )[-1]
+                  if resolve_chain(
+                      curve
+                  )
+                  else curve
+              )
+
+
+              marker = id(
+                  curve
+              )
+
+
+              if marker in seen:
+
+                  return []
+
+
+              seen.add(
+                  marker
+              )
+
+
+              result = []
+
+
+              for node in curve.iter():
+
+                  name = local(
+                      node.tag
+                  )
+
+
+                  if name in {
+                      "ArcByCenterPoint",
+                      "CircleByCenterPoint"
+                  }:
+
+                      if name == "CircleByCenterPoint":
+
+                          points = circle_points(
+                              node
+                          )
+
+                          if points:
+
+                              result.append(
+                                  (
+                                      "circle",
+                                      points
+                                  )
+                              )
+
+                      else:
+
+                          points = arc_by_center_points(
+                              node
+                          )
+
+                          if points:
+
+                              result.append(
+                                  (
+                                      "arc",
+                                      points
+                                  )
+                              )
+
+
+                  elif name in {
+                      "LineStringSegment",
+                      "GeodesicString",
+                      "Geodesic",
+                      "ArcString",
+                      "ArcStringByBulge"
+                  }:
+
+                      points = positions(
+                          node
+                      )
+
+
+                      if len(
+                          points
+                      ) >= 2:
+
+                          result.append(
+                              (
+                                  name,
+                                  points
+                              )
+                          )
+
+
+              return result
+
+
+          # ========================================================
+          # JOIN CURVE SEGMENTS
+          # ========================================================
+
+          def append_joined(
+              output,
+              segment
+          ):
+
+              if not segment:
+
+                  return
+
+
+              if not output:
+
+                  output.extend(
+                      segment
+                  )
+
+                  return
+
+
+              # Normal case: segment starts where previous segment
+              # ended.
+
+              if (
+                  output[-1]
+                  ==
+                  segment[0]
+              ):
+
+                  output.extend(
+                      segment[1:]
+                  )
+
+                  return
+
+
+              # Sometimes floating point differences leave two
+              # nearly identical points.
+
+              def close(
+                  a,
+                  b
+              ):
+
+                  return (
+                      abs(
+                          a[0] - b[0]
+                      )
+                      <
+                      1e-8
+                      and
+                      abs(
+                          a[1] - b[1]
+                      )
+                      <
+                      1e-8
+                  )
+
+
+              if close(
+                  output[-1],
+                  segment[0]
+              ):
+
+                  output.extend(
+                      segment[1:]
+                  )
+
+                  return
+
+
+              # If the encoded curve direction is reversed, reverse
+              # this segment before joining.
+
+              if close(
+                  output[-1],
+                  segment[-1]
+              ):
+
+                  reversed_segment = list(
+                      reversed(
+                          segment
+                      )
+                  )
+
+                  output.extend(
+                      reversed_segment[1:]
+                  )
+
+                  return
+
+
+              # Gap. Preserve the segment rather than silently
+              # discarding it. The diagnostic will expose this.
+
+              output.extend(
+                  segment
+              )
+
+
+          # ========================================================
+          # RING
+          # ========================================================
+
+          def ring_points(
+              ring
+          ):
+
+              resolved = resolve_chain(
+                  ring
+              )
+
+
+              if not resolved:
+
+                  return []
+
+
+              target = resolved[-1]
+
+
+              # First try a conventional LinearRing coordinate list.
+
+              direct = positions(
+                  target
+              )
+
+
+              if len(
+                  direct
+              ) >= 4:
+
+                  if (
+                      direct[0]
+                      !=
+                      direct[-1]
+                  ):
+
+                      direct.append(
+                          direct[0]
+                      )
+
+
+                  return direct
+
+
+              # AIXM commonly uses curveMember.
+
+              joined = []
+
+
+              curve_members = []
+
+
+              for node in target.iter():
+
+                  if local(
+                      node.tag
+                  ) != "curveMember":
+
+                      continue
+
+
+                  target_curve = href_target(
+                      node
+                  )
+
+
+                  if target_curve is None:
+
+                      # It may be an inline Curve.
+
+                      for child in node:
+
+                          if local(
+                              child.tag
+                          ) in {
+                              "Curve",
+                              "GeodesicString",
+                              "LineStringSegment"
+                          }:
+
+                              target_curve = child
+
+                              break
+
+
+                  if target_curve is not None:
+
+                      curve_members.append(
+                          target_curve
+                      )
+
+
+              for curve in curve_members:
+
+                  segments = curve_segments(
+                      curve
+                  )
+
+
+                  for segment_type, segment in segments:
+
+                      append_joined(
+                          joined,
+                          segment
+                      )
+
+
+              if len(
+                  joined
+              ) >= 3:
+
+                  if (
+                      joined[0]
+                      !=
+                      joined[-1]
+                  ):
+
+                      joined.append(
+                          joined[0]
+                      )
+
+
+                  return joined
+
+
+              return []
+
+
+          # ========================================================
+          # SURFACES
+          # ========================================================
+
+          def collect_surface_objects(
+              airspace
+          ):
+
+              result = []
+
+              seen = set()
+
+              queue = [
+                  airspace
+              ]
+
+
+              # Follow every reference under the airspace. This
+              # catches horizontalProjection references, shared
+              # surfaces, rings and curves.
+
+              while queue:
+
+                  current = queue.pop()
+
+
+                  if current is None:
+
+                      continue
+
+
+                  marker = id(
+                      current
+                  )
+
+
+                  if marker in seen:
+
+                      continue
+
+
+                  seen.add(
+                      marker
+                  )
+
+
+                  name = local(
+                      current.tag
+                  )
+
+
+                  if name in {
+                      "Surface",
+                      "CompositeSurface"
+                  }:
+
+                      result.append(
+                          current
+                      )
+
+
+                  # Follow direct xlinks.
+
+                  target = href_target(
+                      current
+                  )
+
+
+                  if target is not None:
+
+                      queue.append(
+                          target
+                      )
+
+
+                  # Follow references contained by this object.
+
+                  for child in current.iter():
+
+                      target = href_target(
+                          child
+                      )
+
+
+                      if target is not None:
+
+                          queue.append(
+                              target
+                          )
+
+
+              return result
+
+
+          # ========================================================
+          # POLYGON PATCHES
+          # ========================================================
+
+          def polygons_for_airspace(
+              airspace
+          ):
+
+              polygons = []
+
+
+              surfaces = collect_surface_objects(
+                  airspace
+              )
+
+
+              for surface in surfaces:
+
+                  for patch in surface.iter():
+
+                      if local(
+                          patch.tag
+                      ) != "PolygonPatch":
+
+                          continue
+
+
+                      exterior = None
+                      interiors = []
+
+
+                      # Only examine direct boundary structures
+                      # beneath this patch.
+
+                      for node in patch:
+
+                          name = local(
+                              node.tag
+                          )
+
+
+                          if name == "exterior":
+
+                              for child in node.iter():
+
+                                  if local(
+                                      child.tag
+                                  ) in {
+                                      "LinearRing",
+                                      "Ring"
+                                  }:
+
+                                      exterior = child
+
+                                      break
+
+
+                          elif name == "interior":
+
+                              for child in node.iter():
+
+                                  if local(
+                                      child.tag
+                                  ) in {
+                                      "LinearRing",
+                                      "Ring"
+                                  }:
+
+                                      points = ring_points(
+                                          child
+                                      )
+
+
+                                      if len(
+                                          points
+                                      ) >= 4:
+
+                                          interiors.append(
+                                              points
+                                          )
+
+
+                                      break
+
+
+                      if exterior is None:
+
+                          continue
+
+
+                      outer = ring_points(
+                          exterior
+                      )
+
+
+                      if len(
+                          outer
+                      ) < 4:
+
+                          continue
+
+
+                      polygons.append(
+                          [
+                              outer
+                          ]
+                          +
+                          interiors
+                      )
+
+
+              return polygons
+
+
+          # ========================================================
+          # AIRSPACE METADATA
+          # ========================================================
+
+          def first_value(
+              element,
+              names
+          ):
+
+              wanted = {
+                  x.lower()
+                  for x in names
+              }
+
+
+              for node in element.iter():
+
+                  if (
+                      local(
+                          node.tag
+                      ).lower()
+                      in wanted
+                      and
+                      node.text
+                  ):
+
                       value = node.text.strip()
 
 
                       if value:
+
                           return value
 
 
@@ -2283,21 +2560,18 @@ jobs:
 
 
           # ========================================================
-          # FIND EVERY NATS AIRSPACE
+          # FIND EVERY AIRSPACE
           # ========================================================
 
-          airspace_elements = []
-
-
-          for element in root.iter():
-
+          airspaces = [
+              element
+              for element in root.iter()
               if local(
                   element.tag
-              ) == "Airspace":
-
-                  airspace_elements.append(
-                      element
-                  )
+              )
+              ==
+              "Airspace"
+          ]
 
 
           print("")
@@ -2306,7 +2580,7 @@ jobs:
           )
 
           print(
-              "RAW NATS AIRSPACE IMPORT"
+              "NATS AIRSPACE GEOMETRY RECONSTRUCTION"
           )
 
           print(
@@ -2319,53 +2593,171 @@ jobs:
           )
 
           print(
-              "NATS Airspace features found:",
+              "NATS Airspace features:",
               len(
-                  airspace_elements
+                  airspaces
               )
           )
 
 
-          if not airspace_elements:
+          if not airspaces:
 
               raise SystemExit(
-                  "ERROR: NATS AIXM contains no Airspace features."
+                  "ERROR: No NATS Airspace features found."
               )
 
-
-          # ========================================================
-          # CREATE GEOJSON
-          #
-          # EVERY AIRSPACE FEATURE IS WRITTEN.
-          # ========================================================
 
           features = []
 
 
           geometry_success = 0
           geometry_missing = 0
-          polygon_count = 0
 
+
+          type_counts = Counter()
+          type_geometry_success = Counter()
+          type_geometry_failure = Counter()
+
+
+          local_type_counts = Counter()
+          local_type_geometry_failure = Counter()
+
+
+          curve_statistics = Counter()
+          ring_failures = 0
+          surface_failures = 0
+
+
+          # ========================================================
+          # PROCESS EVERY AIRSPACE
+          # ========================================================
 
           for index, airspace in enumerate(
-              airspace_elements,
+              airspaces,
               start=1
           ):
+
+              airspace_type = first_value(
+                  airspace,
+                  {
+                      "type",
+                      "AirspaceType"
+                  }
+              )
+
+
+              local_type = first_value(
+                  airspace,
+                  {
+                      "localType",
+                      "AirspaceLocalType"
+                  }
+              )
+
+
+              designator = first_value(
+                  airspace,
+                  {
+                      "designator"
+                  }
+              )
+
+
+              name = first_value(
+                  airspace,
+                  {
+                      "name"
+                  }
+              )
+
+
+              airspace_class = first_value(
+                  airspace,
+                  {
+                      "class",
+                      "AirspaceClass"
+                  }
+              )
+
+
+              type_key = (
+                  airspace_type
+                  or
+                  "(blank)"
+              )
+
+
+              local_key = (
+                  local_type
+                  or
+                  "(blank)"
+              )
+
+
+              type_counts[
+                  type_key
+              ] += 1
+
+
+              local_type_counts[
+                  local_key
+              ] += 1
+
 
               polygons = polygons_for_airspace(
                   airspace
               )
 
 
+              if not polygons:
+
+                  geometry_missing += 1
+
+                  type_geometry_failure[
+                      type_key
+                  ] += 1
+
+                  local_type_geometry_failure[
+                      local_key
+                  ] += 1
+
+              else:
+
+                  geometry_success += 1
+
+                  type_geometry_success[
+                      type_key
+                  ] += 1
+
+
+                  for polygon in polygons:
+
+                      if len(
+                          polygon
+                      ) >= 1:
+
+                          curve_statistics[
+                              "polygon"
+                          ] += 1
+
+
+                          if len(
+                              polygon[0]
+                          ) >= 4:
+
+                              curve_statistics[
+                                  "outer_ring"
+                              ] += 1
+
+                          else:
+
+                              ring_failures += 1
+
+
               geometry = None
 
 
               if polygons:
-
-                  polygon_count += len(
-                      polygons
-                  )
-
 
                   if len(
                       polygons
@@ -2388,62 +2780,6 @@ jobs:
                       }
 
 
-                  geometry_success += 1
-
-              else:
-
-                  geometry_missing += 1
-
-
-              # ----------------------------------------------------
-              # Preserve useful NATS/AIXM metadata.
-              #
-              # We DO NOT use these fields to filter anything.
-              # ----------------------------------------------------
-
-              designator = first_value(
-                  airspace,
-                  {
-                      "designator"
-                  }
-              )
-
-
-              name = first_value(
-                  airspace,
-                  {
-                      "name"
-                  }
-              )
-
-
-              airspace_type = first_value(
-                  airspace,
-                  {
-                      "type",
-                      "AirspaceType"
-                  }
-              )
-
-
-              local_type = first_value(
-                  airspace,
-                  {
-                      "localType",
-                      "AirspaceLocalType"
-                  }
-              )
-
-
-              airspace_class = first_value(
-                  airspace,
-                  {
-                      "class",
-                      "AirspaceClass"
-                  }
-              )
-
-
               identifier = (
                   attr_local(
                       airspace,
@@ -2460,6 +2796,9 @@ jobs:
 
 
               properties = {
+
+                  # Raw NATS/AIXM metadata.
+
                   "source":
                       "NATS UK ICAO AIP Dataset",
 
@@ -2514,8 +2853,73 @@ jobs:
               )
 
 
+              # Useful live diagnostics for ATZ/MATZ and any
+              # suspiciously named feature.
+
+              combined = (
+                  f"{airspace_type} "
+                  f"{local_type} "
+                  f"{designator} "
+                  f"{name}"
+              ).upper()
+
+
+              if (
+                  "ATZ" in combined
+                  or
+                  "MATZ" in combined
+              ):
+
+                  print("")
+                  print(
+                      "SPECIAL DIAGNOSTIC:"
+                  )
+
+                  print(
+                      "Airspace:",
+                      index
+                  )
+
+                  print(
+                      "Designator:",
+                      designator
+                  )
+
+                  print(
+                      "Name:",
+                      name
+                  )
+
+                  print(
+                      "Type:",
+                      airspace_type
+                  )
+
+                  print(
+                      "LocalType:",
+                      local_type
+                  )
+
+                  print(
+                      "Geometry:",
+                      (
+                          "YES"
+                          if geometry
+                          else
+                          "NO"
+                      )
+                  )
+
+                  print(
+                      "Polygons:",
+                      len(
+                          polygons
+                      )
+                  )
+
+
           # ========================================================
-          # WRITE OUTPUT
+          # WRITE GEOJSON
           # ========================================================
 
           output = {
@@ -2542,13 +2946,17 @@ jobs:
           )
 
 
+          # ========================================================
+          # DIAGNOSTICS
+          # ========================================================
+
           print("")
           print(
               "=========================================="
           )
 
           print(
-              "IMPORT COMPLETE"
+              "GEOMETRY SUMMARY"
           )
 
           print(
@@ -2556,50 +2964,116 @@ jobs:
           )
 
           print(
-              "NATS Airspace features:",
-              len(features)
+              "Total NATS Airspace:",
+              len(
+                  airspaces
+              )
           )
 
           print(
-              "Features with geometry:",
+              "Airspace with geometry:",
               geometry_success
           )
 
           print(
-              "Features without geometry:",
+              "Airspace without geometry:",
               geometry_missing
           )
 
           print(
-              "Polygon geometries:",
-              polygon_count
+              "Ring failures:",
+              ring_failures
+          )
+
+
+          print("")
+          print(
+              "AIRSPACE TYPES"
           )
 
           print(
-              "GeoJSON written:",
+              "------------------------------------------"
+          )
+
+
+          for key, count in type_counts.most_common():
+
+              success = type_geometry_success[
+                  key
+              ]
+
+              failure = type_geometry_failure[
+                  key
+              ]
+
+
+              print(
+                  f"{key:30s} "
+                  f"total={count:5d} "
+                  f"geometry={success:5d} "
+                  f"failed={failure:5d}"
+              )
+
+
+          print("")
+          print(
+              "LOCAL TYPES"
+          )
+
+          print(
+              "------------------------------------------"
+          )
+
+
+          for key, count in local_type_counts.most_common():
+
+              failure = local_type_geometry_failure[
+                  key
+              ]
+
+
+              print(
+                  f"{key:40s} "
+                  f"total={count:5d} "
+                  f"geometry_failed={failure:5d}"
+              )
+
+
+          print("")
+          print(
+              "OUTPUT:"
+          )
+
+          print(
               OUTPUT_FILE
           )
 
 
-          # --------------------------------------------------------
-          # IMPORTANT:
-          #
-          # We intentionally DO NOT fail because some features have
-          # no geometry.
-          #
-          # The purpose of this build is to expose the complete NATS
-          # Airspace feature set so we can inspect what NATS actually
-          # supplied before deciding how AviMap should portray it.
-          # --------------------------------------------------------
+          print("")
+          print(
+              "IMPORTANT:"
+          )
+
+          print(
+              "No airspace classification filtering was performed."
+          )
+
+          print(
+              "Every NATS Airspace feature has been written."
+          )
+
+          print(
+              "Features without geometry remain in GeoJSON as geometry:null."
+          )
 
           PY
 
 
       # ============================================================
-      # IMPORT ALL NATS VRPs
+      # VRP CONVERSION
       # ============================================================
 
-      - name: Import ALL NATS reporting points
+      - name: Convert NATS reporting points
         run: |
           set -euo pipefail
 
@@ -2611,34 +3085,20 @@ jobs:
           from pathlib import Path
 
 
-          SOURCE = Path(
+          source = Path(
               "/tmp/uk-vrps.csv"
           )
 
 
-          OUTPUT = Path(
+          output = Path(
               "/tmp/avimap-data/"
               "uk-reporting-points.geojson"
           )
 
 
-          raw = SOURCE.read_text(
+          raw = source.read_text(
               encoding="utf-8-sig",
               errors="replace"
-          )
-
-
-          print("")
-          print(
-              "=========================================="
-          )
-
-          print(
-              "NATS VRP IMPORT"
-          )
-
-          print(
-              "=========================================="
           )
 
 
@@ -2652,14 +3112,6 @@ jobs:
           except csv.Error:
 
               dialect = csv.excel
-
-
-          print(
-              "Detected delimiter:",
-              repr(
-                  dialect.delimiter
-              )
-          )
 
 
           reader = csv.DictReader(
@@ -2676,7 +3128,7 @@ jobs:
           if not rows:
 
               raise SystemExit(
-                  "ERROR: NATS VRP CSV contains no records."
+                  "ERROR: No VRP records."
               )
 
 
@@ -2685,25 +3137,6 @@ jobs:
               for field in rows[0].keys()
               if field is not None
           ]
-
-
-          print(
-              "CSV records:",
-              len(rows)
-          )
-
-
-          print(
-              "Fields:"
-          )
-
-
-          for field in fields:
-
-              print(
-                  "  ",
-                  repr(field)
-              )
 
 
           def normalise(
@@ -2746,12 +3179,9 @@ jobs:
 
                   for candidate in candidates:
 
-                      candidate_key = normalise(
+                      if normalise(
                           candidate
-                      )
-
-
-                      if candidate_key in key:
+                      ) in key:
 
                           return original
 
@@ -2770,8 +3200,8 @@ jobs:
           longitude_field = find_field(
               [
                   "Longitude",
-                  "Longitude",
-                  "Lon"
+                  "Lon",
+                  "Long"
               ]
           )
 
@@ -2783,20 +3213,8 @@ jobs:
           ):
 
               raise SystemExit(
-                  "ERROR: Could not identify VRP latitude/longitude fields."
+                  "ERROR: VRP coordinate fields not found."
               )
-
-
-          print(
-              "Latitude field:",
-              latitude_field
-          )
-
-
-          print(
-              "Longitude field:",
-              longitude_field
-          )
 
 
           def parse_coordinate(
@@ -2835,7 +3253,6 @@ jobs:
                       ).upper()
                   )
 
-
                   text = (
                       text[
                           :match.start()
@@ -2843,8 +3260,6 @@ jobs:
                       .strip()
                   )
 
-
-              # Decimal degrees.
 
               try:
 
@@ -2882,16 +3297,10 @@ jobs:
 
                       return number
 
-
               except ValueError:
 
                   pass
 
-
-              # NATS DMS form, e.g.
-              #
-              # 514645N
-              # 0001328W
 
               if hemisphere:
 
@@ -2904,14 +3313,14 @@ jobs:
 
                   try:
 
-                      integer_part = cleaned.split(
+                      whole = cleaned.split(
                           ".",
                           1
                       )[0]
 
 
                       if len(
-                          integer_part
+                          whole
                       ) >= 6:
 
                           if latitude:
@@ -2946,15 +3355,9 @@ jobs:
                           number = (
                               degrees
                               +
-                              (
-                                  minutes /
-                                  60.0
-                              )
+                              minutes / 60.0
                               +
-                              (
-                                  seconds /
-                                  3600.0
-                              )
+                              seconds / 3600.0
                           )
 
 
@@ -2967,7 +3370,6 @@ jobs:
 
 
                           return number
-
 
                   except ValueError:
 
@@ -2991,12 +3393,9 @@ jobs:
           features = []
 
 
-          invalid = 0
-
-
           for row in rows:
 
-              latitude = parse_coordinate(
+              lat = parse_coordinate(
                   row.get(
                       latitude_field
                   ),
@@ -3004,7 +3403,7 @@ jobs:
               )
 
 
-              longitude = parse_coordinate(
+              lon = parse_coordinate(
                   row.get(
                       longitude_field
                   ),
@@ -3013,12 +3412,10 @@ jobs:
 
 
               if (
-                  latitude is None
+                  lat is None
                   or
-                  longitude is None
+                  lon is None
               ):
-
-                  invalid += 1
 
                   continue
 
@@ -3065,35 +3462,22 @@ jobs:
 
                               "coordinates":
                                   [
-                                      longitude,
-                                      latitude
+                                      lon,
+                                      lat
                                   ]
                           }
                   }
               )
 
 
-          print("")
-          print(
-              "Valid VRPs:",
-              len(features)
-          )
-
-
-          print(
-              "Invalid VRP rows:",
-              invalid
-          )
-
-
           if not features:
 
               raise SystemExit(
-                  "ERROR: Zero valid NATS VRPs."
+                  "ERROR: No valid VRPs."
               )
 
 
-          OUTPUT.write_text(
+          output.write_text(
               json.dumps(
                   {
                       "type":
@@ -3113,90 +3497,85 @@ jobs:
 
 
           print(
-              "VRP GeoJSON written:",
-              OUTPUT
+              "NATS VRPs:",
+              len(features)
           )
+
 
           PY
 
 
       # ============================================================
-      # VALIDATION
-      #
-      # NO AIRSPACE CATEGORY VALIDATION.
-      #
-      # We only check that the NATS Airspace collection and VRP
-      # collection exist and contain records.
+      # VALIDATE
       # ============================================================
 
-      - name: Validate raw NATS import
+      - name: Validate generated data
         run: |
           set -euo pipefail
 
+          AIRSPACE="/tmp/avimap-data/uk-airspace.geojson"
 
-          AIRSPACE_FILE="/tmp/avimap-data/uk-airspace.geojson"
-
-          VRP_FILE="/tmp/avimap-data/uk-reporting-points.geojson"
+          VRP="/tmp/avimap-data/uk-reporting-points.geojson"
 
 
-          test -s "${AIRSPACE_FILE}"
+          test -s "${AIRSPACE}"
 
-          test -s "${VRP_FILE}"
+          test -s "${VRP}"
 
 
           AIRSPACE_COUNT=$(
             jq \
               '.features | length' \
-              "${AIRSPACE_FILE}"
+              "${AIRSPACE}"
+          )
+
+
+          GEOMETRY_COUNT=$(
+            jq \
+              '[.features[] | select(.geometry != null)] | length' \
+              "${AIRSPACE}"
+          )
+
+
+          NULL_GEOMETRY_COUNT=$(
+            jq \
+              '[.features[] | select(.geometry == null)] | length' \
+              "${AIRSPACE}"
           )
 
 
           VRP_COUNT=$(
             jq \
               '.features | length' \
-              "${VRP_FILE}"
-          )
-
-
-          AIRSPACE_WITH_GEOMETRY=$(
-            jq \
-              '[.features[] | select(.geometry != null)] | length' \
-              "${AIRSPACE_FILE}"
-          )
-
-
-          AIRSPACE_WITHOUT_GEOMETRY=$(
-            jq \
-              '[.features[] | select(.geometry == null)] | length' \
-              "${AIRSPACE_FILE}"
+              "${VRP}"
           )
 
 
           echo ""
           echo "=========================================="
 
-          echo "RAW NATS IMPORT SUMMARY"
+          echo "FINAL DATA VALIDATION"
 
           echo "=========================================="
 
           echo ""
 
-          echo "NATS Airspace features:"
+          echo "Airspace:"
           echo "${AIRSPACE_COUNT}"
 
           echo ""
 
           echo "Airspace with geometry:"
-          echo "${AIRSPACE_WITH_GEOMETRY}"
+          echo "${GEOMETRY_COUNT}"
 
           echo ""
 
           echo "Airspace without geometry:"
-          echo "${AIRSPACE_WITHOUT_GEOMETRY}"
+          echo "${NULL_GEOMETRY_COUNT}"
 
           echo ""
 
-          echo "NATS reporting points:"
+          echo "Reporting points:"
           echo "${VRP_COUNT}"
 
           echo ""
@@ -3204,7 +3583,7 @@ jobs:
 
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
 
-            echo "ERROR: Zero NATS Airspace features."
+            echo "ERROR: No airspace."
 
             exit 1
 
@@ -3213,24 +3592,23 @@ jobs:
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
 
-            echo "ERROR: Zero NATS reporting points."
+            echo "ERROR: No reporting points."
 
             exit 1
 
           fi
 
 
-          echo "Raw NATS import validation successful."
+          echo "Validation successful."
 
 
       # ============================================================
-      # INSTALL DATA
+      # INSTALL
       # ============================================================
 
-      - name: Install NATS aviation data
+      - name: Install aviation data
         run: |
           set -euo pipefail
-
 
           mkdir -p data
 
@@ -3245,11 +3623,6 @@ jobs:
             data/uk-reporting-points.geojson
 
 
-          echo ""
-          echo "Installed:"
-          echo ""
-
-
           ls -lh \
             data/uk-airspace.geojson \
             data/uk-reporting-points.geojson
@@ -3259,15 +3632,13 @@ jobs:
       # COMMIT
       # ============================================================
 
-      - name: Commit NATS aviation data
+      - name: Commit aviation data
         run: |
           set -euo pipefail
-
 
           git config \
             user.name \
             "AviMap Data Bot"
-
 
           git config \
             user.email \
@@ -3281,16 +3652,12 @@ jobs:
 
           if git diff --cached --quiet; then
 
-            echo ""
-            echo "No aviation data changes detected."
+            echo "No aviation data changes."
 
             exit 0
 
           fi
 
-
-          echo ""
-          echo "Files being committed:"
 
           git diff \
             --cached \
@@ -3298,7 +3665,7 @@ jobs:
 
 
           git commit \
-            -m "Import complete NATS aviation dataset"
+            -m "Improve NATS AIXM airspace geometry"
 
 
           git push
