@@ -51,9 +51,7 @@ jobs:
           from datetime import datetime, timezone
           from urllib.parse import urljoin
 
-          BASE = (
-              "https://nats-uk.ead-it.com"
-          )
+          BASE = "https://nats-uk.ead-it.com"
 
           html = open(
               "/tmp/nats-datasets.html",
@@ -71,10 +69,7 @@ jobs:
               timezone.utc
           ).date()
 
-          def select_dataset(
-              patterns,
-              label
-          ):
+          def select_dataset(patterns, label):
               candidates = []
 
               for href in hrefs:
@@ -91,21 +86,15 @@ jobs:
                           continue
 
                       try:
-
                           date = datetime.strptime(
                               match.group(1),
                               "%Y%m%d"
                           ).date()
-
                       except ValueError:
-
                           continue
 
                       candidates.append(
-                          (
-                              date,
-                              href
-                          )
+                          (date, href)
                       )
 
                       break
@@ -118,9 +107,7 @@ jobs:
                   )
 
                   print("")
-                  print(
-                      "Relevant NATS links:"
-                  )
+                  print("Relevant links found:")
 
                   for href in hrefs:
 
@@ -128,15 +115,10 @@ jobs:
 
                       if (
                           "AIP" in upper
-                          or
-                          "AIS" in upper
-                          or
-                          "VRP" in upper
+                          or "AIS" in upper
+                          or "VRP" in upper
                       ):
-
-                          print(
-                              href
-                          )
+                          print(href)
 
                   raise SystemExit(1)
 
@@ -146,12 +128,10 @@ jobs:
                   if item[0] <= today
               ]
 
-              selected = max(
+              date, href = max(
                   current or candidates,
                   key=lambda item: item[0]
               )
-
-              date, href = selected
 
               url = urljoin(
                   BASE,
@@ -159,26 +139,14 @@ jobs:
               )
 
               print("")
-              print(
-                  f"{label}:"
-              )
-              print(
-                  f"  Effective date: {date}"
-              )
-              print(
-                  f"  URL: {url}"
-              )
+              print(label)
+              print("  Date:", date)
+              print("  URL :", url)
 
-              return (
-                  date,
-                  url
-              )
+              return date, url
 
           # --------------------------------------------------------
           # AIP XML
-          #
-          # Current NATS filename:
-          # EG_AIP_DS_20260806_XML.zip
           # --------------------------------------------------------
 
           aip_date, aip_url = select_dataset(
@@ -191,18 +159,22 @@ jobs:
           )
 
           # --------------------------------------------------------
-          # AIP KML
+          # AIP KML / KMZ
           #
-          # Current NATS filename:
+          # Current NATS page exposes:
+          #
           # EG_AIS_DS_FULL_20260806_KML.zip
           #
-          # Note the AIS in this filename.
+          # which contains:
+          #
+          # EG_AIP_DS_FULL_20260806.kmz
           # --------------------------------------------------------
 
           kml_date, kml_url = select_dataset(
               [
                   r'EG_AIS_DS_FULL_(\d{8})_KML\.zip$',
-                  r'EG_AIP_DS_FULL_(\d{8})_KML\.zip$'
+                  r'EG_AIP_DS_FULL_(\d{8})_KML\.zip$',
+                  r'EG_AIS_DS_(\d{8})_KML\.zip$'
               ],
               "UK ICAO AIP KML"
           )
@@ -220,79 +192,63 @@ jobs:
               "NATS VRP"
           )
 
-          print("")
-          print("==========================================")
-          print("SELECTED NATS DATASETS")
-          print("==========================================")
-          print("")
-          print(
-              "AIP XML:",
-              aip_date,
-              aip_url
-          )
-          print(
-              "AIP KML:",
-              kml_date,
-              kml_url
-          )
-          print(
-              "VRP:",
-              vrp_date,
-              vrp_url
-          )
-
           # --------------------------------------------------------
-          # Safety: XML and KML must refer to the same AIRAC.
+          # XML and KML must be the same AIRAC
           # --------------------------------------------------------
 
           if aip_date != kml_date:
 
               raise SystemExit(
-                  "ERROR: NATS AIP XML and KML dates do not match."
-                  f" XML={aip_date}, KML={kml_date}"
+                  "ERROR: AIP XML and KML AIRAC dates differ. "
+                  f"XML={aip_date}, KML={kml_date}"
               )
+
+          print("")
+          print("==========================================")
+          print("SELECTED NATS DATASETS")
+          print("==========================================")
+          print("")
+          print("AIP XML:")
+          print(aip_url)
+          print("")
+          print("AIP KML:")
+          print(kml_url)
+          print("")
+          print("VRP:")
+          print(vrp_url)
+          print("")
+          print("AIRAC:")
+          print(aip_date)
 
           open(
               "/tmp/nats-aip-url.txt",
               "w"
-          ).write(
-              aip_url
-          )
+          ).write(aip_url)
 
           open(
               "/tmp/nats-aip-date.txt",
               "w"
-          ).write(
-              str(aip_date)
-          )
+          ).write(str(aip_date))
 
           open(
               "/tmp/nats-kml-url.txt",
               "w"
-          ).write(
-              kml_url
-          )
+          ).write(kml_url)
 
           open(
               "/tmp/nats-kml-date.txt",
               "w"
-          ).write(
-              str(kml_date)
-          )
+          ).write(str(kml_date))
 
           open(
               "/tmp/nats-vrp-url.txt",
               "w"
-          ).write(
-              vrp_url
-          )
+          ).write(vrp_url)
 
           open(
               "/tmp/nats-vrp-date.txt",
               "w"
-          ).write(
-              str(vrp_date)
-          )
+          ).write(str(vrp_date))
           PY
 
       # ============================================================
@@ -305,7 +261,6 @@ jobs:
 
           AIP_URL=$(cat /tmp/nats-aip-url.txt)
 
-          echo ""
           echo "=========================================="
           echo "Downloading NATS AIP XML"
           echo "=========================================="
@@ -330,7 +285,7 @@ jobs:
 
           if file /tmp/nats-aip-source | grep -qi "zip"; then
 
-              echo "AIP download is a ZIP."
+              echo "AIP source is ZIP."
 
               unzip \
                 -o \
@@ -339,13 +294,21 @@ jobs:
 
           else
 
-              echo "AIP download is not recognised as ZIP."
+              echo "ERROR: AIP source is not a ZIP."
 
               file /tmp/nats-aip-source
 
               exit 1
 
           fi
+
+          echo ""
+          echo "AIP extracted files:"
+
+          find \
+            /tmp/nats-aip \
+            -type f \
+            -print
 
           AIP_XML=$(
             find \
@@ -358,12 +321,7 @@ jobs:
           if [ -z "$AIP_XML" ]; then
 
               echo ""
-              echo "ERROR: No XML found inside NATS AIP ZIP."
-
-              find \
-                /tmp/nats-aip \
-                -type f \
-                -print
+              echo "ERROR: No AIP XML found."
 
               exit 1
 
@@ -381,7 +339,17 @@ jobs:
             /tmp/uk-aip.xml
 
       # ============================================================
-      # DOWNLOAD NATS AIP KML
+      # DOWNLOAD NATS KML DATASET
+      #
+      # IMPORTANT:
+      #
+      # NATS gives us a ZIP containing a KMZ.
+      # The KMZ then contains the actual KML.
+      #
+      # ZIP
+      #  └── EG_AIP_DS_FULL_20260806.kmz
+      #       └── *.kml
+      #
       # ============================================================
 
       - name: Download NATS AIP KML dataset
@@ -390,9 +358,8 @@ jobs:
 
           KML_URL=$(cat /tmp/nats-kml-url.txt)
 
-          echo ""
           echo "=========================================="
-          echo "Downloading NATS AIP KML"
+          echo "Downloading NATS AIP KML dataset"
           echo "=========================================="
           echo ""
           echo "$KML_URL"
@@ -410,53 +377,53 @@ jobs:
 
           test -s /tmp/nats-kml-source
 
-          rm -rf /tmp/nats-kml
-          mkdir -p /tmp/nats-kml
+          rm -rf \
+            /tmp/nats-kml \
+            /tmp/nats-kmz
 
-          if file /tmp/nats-kml-source | grep -qi "zip"; then
-
-              echo "KML download is a ZIP."
-
-              unzip \
-                -o \
-                /tmp/nats-kml-source \
-                -d /tmp/nats-kml
-
-          else
-
-              echo "ERROR: NATS KML download is not a ZIP."
-
-              file /tmp/nats-kml-source
-
-              exit 1
-
-          fi
+          mkdir -p \
+            /tmp/nats-kml \
+            /tmp/nats-kmz
 
           echo ""
-          echo "Extracted KML files:"
+          echo "Outer archive:"
+
+          file \
+            /tmp/nats-kml-source
+
+          # --------------------------------------------------------
+          # OUTER ZIP
+          # --------------------------------------------------------
+
+          unzip \
+            -o \
+            /tmp/nats-kml-source \
+            -d /tmp/nats-kml
+
+          echo ""
+          echo "Outer ZIP contents:"
 
           find \
             /tmp/nats-kml \
             -type f \
-            \( \
-              -iname "*.kml" \
-              -o \
-              -iname "*.kmz" \
-            \) \
             -print
 
-          KML_COUNT=$(
+          # --------------------------------------------------------
+          # FIND KMZ
+          # --------------------------------------------------------
+
+          KMZ_FILE=$(
             find \
               /tmp/nats-kml \
               -type f \
-              -iname "*.kml" \
-              | wc -l
+              -iname "*.kmz" \
+              | head -n 1
           )
 
-          if [ "$KML_COUNT" -eq 0 ]; then
+          if [ -z "$KMZ_FILE" ]; then
 
               echo ""
-              echo "ERROR: No KML files found inside NATS KML ZIP."
+              echo "ERROR: No KMZ file found inside NATS KML ZIP."
 
               find \
                 /tmp/nats-kml \
@@ -468,8 +435,75 @@ jobs:
           fi
 
           echo ""
-          echo "KML files found:"
+          echo "KMZ found:"
+          echo "$KMZ_FILE"
+
+          # --------------------------------------------------------
+          # KMZ IS ANOTHER ZIP
+          # --------------------------------------------------------
+
+          echo ""
+          echo "Extracting KMZ..."
+
+          unzip \
+            -o \
+            "$KMZ_FILE" \
+            -d /tmp/nats-kmz
+
+          echo ""
+          echo "KMZ contents:"
+
+          find \
+            /tmp/nats-kmz \
+            -type f \
+            -print
+
+          # --------------------------------------------------------
+          # FIND ACTUAL KML
+          # --------------------------------------------------------
+
+          KML_COUNT=$(
+            find \
+              /tmp/nats-kmz \
+              -type f \
+              -iname "*.kml" \
+              | wc -l
+          )
+
+          echo ""
+          echo "Actual KML files found:"
           echo "$KML_COUNT"
+
+          if [ "$KML_COUNT" -eq 0 ]; then
+
+              echo ""
+              echo "ERROR: KMZ contained no KML."
+
+              find \
+                /tmp/nats-kmz \
+                -type f \
+                -print
+
+              exit 1
+
+          fi
+
+          mkdir -p \
+            /tmp/nats-final-kml
+
+          find \
+            /tmp/nats-kmz \
+            -type f \
+            -iname "*.kml" \
+            -exec cp {} /tmp/nats-final-kml/ \;
+
+          echo ""
+          echo "Final KML files:"
+
+          find \
+            /tmp/nats-final-kml \
+            -type f \
+            -print
 
       # ============================================================
       # DOWNLOAD NATS VRPS
@@ -481,7 +515,6 @@ jobs:
 
           VRP_URL=$(cat /tmp/nats-vrp-url.txt)
 
-          echo ""
           echo "=========================================="
           echo "Downloading NATS VRP dataset"
           echo "=========================================="
@@ -501,8 +534,11 @@ jobs:
 
           test -s /tmp/nats-vrp-source
 
-          rm -rf /tmp/nats-vrp
-          mkdir -p /tmp/nats-vrp
+          rm -rf \
+            /tmp/nats-vrp
+
+          mkdir -p \
+            /tmp/nats-vrp
 
           if file /tmp/nats-vrp-source | grep -qi "zip"; then
 
@@ -534,7 +570,7 @@ jobs:
           if [ -z "$VRP_CSV" ]; then
 
               echo ""
-              echo "ERROR: No CSV found in NATS VRP dataset."
+              echo "ERROR: No VRP CSV found."
 
               find \
                 /tmp/nats-vrp \
@@ -557,12 +593,7 @@ jobs:
             /tmp/uk-vrps.csv
 
       # ============================================================
-      # CONVERT NATS KML AIRSPACE
-      #
-      # KML supplies the actual geographic geometry.
-      #
-      # AIP XML is used as an additional source of airspace
-      # terminology/classification where a useful match can be made.
+      # CONVERT NATS KML AIRSPACE TO GEOJSON
       # ============================================================
 
       - name: Convert NATS KML airspace to GeoJSON
@@ -574,14 +605,12 @@ jobs:
 
           python3 <<'PY'
           import json
-          import math
           import re
-          import zipfile
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
           KML_ROOT = Path(
-              "/tmp/nats-kml"
+              "/tmp/nats-final-kml"
           )
 
           AIP_XML = Path(
@@ -598,10 +627,6 @@ jobs:
               encoding="utf-8"
           ).strip()
 
-          # ========================================================
-          # HELPERS
-          # ========================================================
-
           def local(tag):
               return tag.rsplit(
                   "}",
@@ -615,48 +640,6 @@ jobs:
                   str(value or "")
               ).strip()
 
-          def normalise(value):
-              return re.sub(
-                  r"[^A-Z0-9]+",
-                  "",
-                  str(value or "").upper()
-              )
-
-          def combined_text(
-              element
-          ):
-              parts = []
-
-              for node in element.iter():
-
-                  if node.text:
-
-                      value = clean(
-                          node.text
-                      )
-
-                      if value:
-                          parts.append(
-                              value
-                          )
-
-              return " ".join(
-                  parts
-              )
-
-          # ========================================================
-          # CANONICAL AVIMAP CLASSIFICATION
-          #
-          # A-G
-          # PA
-          # RA
-          # DA
-          # ATZ
-          # MATZ
-          # RMZ
-          # TMZ
-          # ========================================================
-
           def classify(
               text,
               explicit_class=""
@@ -667,64 +650,57 @@ jobs:
               ).upper()
 
               # ----------------------------------------------------
-              # SPECIAL ZONES FIRST
+              # SPECIAL ZONES
               # ----------------------------------------------------
 
               if re.search(
                   r"\b(?:MATZ|MILITARY\s+AERODROME\s+TRAFFIC\s+ZONE|MILITARY\s+ATZ)\b",
                   value
               ):
-
                   return "MATZ"
 
               if re.search(
                   r"\b(?:RMZ|RADIO\s+(?:COMMUNICATION\s+)?MANDATORY\s+ZONE)\b",
                   value
               ):
-
                   return "RMZ"
 
               if re.search(
                   r"\b(?:TMZ|TRANSPONDER\s+MANDATORY\s+ZONE)\b",
                   value
               ):
-
                   return "TMZ"
 
               if re.search(
                   r"\b(?:ATZ|AERODROME\s+TRAFFIC\s+ZONE)\b",
                   value
               ):
-
                   return "ATZ"
 
               # ----------------------------------------------------
-              # PROHIBITED / RESTRICTED / DANGER
+              # P / R / D
               # ----------------------------------------------------
 
               if re.search(
                   r"\b(?:PA|PROHIBITED\s+AREA|PROHIBITED)\b",
                   value
               ):
-
                   return "PA"
 
               if re.search(
                   r"\b(?:RA|RESTRICTED\s+AREA|RESTRICTED)\b",
                   value
               ):
-
                   return "RA"
 
               if re.search(
                   r"\b(?:DA|DANGER\s+AREA|DANGER)\b",
                   value
               ):
-
                   return "DA"
 
               # ----------------------------------------------------
-              # EXPLICIT CLASS
+              # CLASS A-G
               # ----------------------------------------------------
 
               explicit = re.sub(
@@ -744,7 +720,6 @@ jobs:
                   "F",
                   "G"
               }:
-
                   return explicit
 
               if explicit in {
@@ -756,12 +731,7 @@ jobs:
                   "CLASSF",
                   "CLASSG"
               }:
-
                   return explicit[-1]
-
-              # ----------------------------------------------------
-              # CLASS WORDS
-              # ----------------------------------------------------
 
               match = re.search(
                   r"\bCLASS\s*([A-G])\b",
@@ -769,12 +739,7 @@ jobs:
               )
 
               if match:
-
                   return match.group(1)
-
-              # ----------------------------------------------------
-              # "CLASS A AIRSPACE" etc.
-              # ----------------------------------------------------
 
               match = re.search(
                   r"\b([A-G])\s+CLASS\b",
@@ -782,30 +747,20 @@ jobs:
               )
 
               if match:
-
                   return match.group(1)
 
               return None
 
           # ========================================================
-          # XML METADATA INDEX
-          #
-          # This is deliberately metadata only.
-          # Geometry comes from the NATS KML.
+          # READ AIP XML METADATA
           # ========================================================
 
           xml_index = []
 
           print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "INDEXING NATS AIP XML METADATA"
-          )
-          print(
-              "=========================================="
-          )
+          print("==========================================")
+          print("INDEXING NATS AIP XML")
+          print("==========================================")
 
           try:
 
@@ -820,18 +775,15 @@ jobs:
                   if local(
                       element.tag
                   ) != "Airspace":
-
                       continue
 
                   designator = ""
                   name = ""
-                  airspace_type = ""
-                  local_type = ""
-                  classification = ""
+                  metadata = []
 
                   for node in element.iter():
 
-                      node_name = local(
+                      tag = local(
                           node.tag
                       )
 
@@ -844,184 +796,117 @@ jobs:
                       if not value:
                           continue
 
-                      if (
-                          not designator
-                          and
-                          node_name.lower()
-                          in {
-                              "designator",
-                              "airspacedesignator"
-                          }
-                      ):
+                      if tag.lower() in {
+                          "designator",
+                          "airspacedesignator"
+                      }:
 
-                          designator = value
+                          if not designator:
+                              designator = value
 
-                      if (
-                          not name
-                          and
-                          node_name.lower()
-                          in {
-                              "name",
-                              "airspacename"
-                          }
-                      ):
+                      if tag.lower() in {
+                          "name",
+                          "airspacename"
+                      }:
 
-                          name = value
+                          if not name:
+                              name = value
 
-                      if (
-                          node_name.lower()
-                          in {
-                              "type",
-                              "airspacetype"
-                          }
-                      ):
+                      if tag.lower() in {
+                          "type",
+                          "airspacetype",
+                          "localtype",
+                          "airspacelocaltype",
+                          "class",
+                          "airspaceclassification",
+                          "classification"
+                      }:
 
-                          airspace_type += (
-                              " "
-                              + value
+                          metadata.append(
+                              value
                           )
 
-                      if (
-                          node_name.lower()
-                          in {
-                              "localtype",
-                              "airspacelocaltype"
-                          }
-                      ):
-
-                          local_type += (
-                              " "
-                              + value
-                          )
-
-                      if (
-                          node_name.lower()
-                          in {
-                              "class",
-                              "airspaceclassification",
-                              "classification"
-                          }
-                      ):
-
-                          classification += (
-                              " "
-                              + value
-                          )
-
-                  metadata_text = " ".join(
+                  combined = " ".join(
                       [
                           designator,
-                          name,
-                          airspace_type,
-                          local_type,
-                          classification
+                          name
                       ]
+                      + metadata
                   )
 
                   category = classify(
-                      metadata_text,
-                      classification
+                      combined
                   )
 
                   xml_index.append(
                       {
-                          "designator": clean(
-                              designator
-                          ),
-                          "name": clean(
-                              name
-                          ),
+                          "designator": designator,
+                          "name": name,
                           "category": category,
-                          "text": clean(
-                              metadata_text
-                          )
+                          "text": combined
                       }
                   )
 
           except Exception as exc:
 
               print(
-                  "WARNING: Could not index AIP XML metadata:"
+                  "WARNING: AIP XML metadata indexing failed:"
               )
 
               print(
                   repr(exc)
               )
 
-              print(
-                  "KML classification will still be attempted."
-              )
-
           print(
-              "AIP Airspace metadata records:",
+              "AIP metadata records:",
               len(xml_index)
           )
 
-          # ========================================================
-          # XML MATCHING
-          # ========================================================
-
-          def find_xml_metadata(
-              placemark_text
+          def xml_match(
+              text
           ):
 
-              if not xml_index:
-                  return None
-
-              candidate = clean(
-                  placemark_text
-              )
-
-              if not candidate:
-                  return None
-
-              candidate_upper = candidate.upper()
-
-              # ----------------------------------------------------
-              # Exact-ish designator/name match first.
-              # ----------------------------------------------------
+              upper = text.upper()
 
               for item in xml_index:
 
                   designator = (
                       item["designator"]
-                      .upper()
-                  )
+                      or ""
+                  ).upper()
 
                   name = (
                       item["name"]
-                      .upper()
-                  )
+                      or ""
+                  ).upper()
 
                   if (
                       designator
                       and
-                      designator in candidate_upper
+                      designator in upper
                   ):
-
                       return item
 
                   if (
                       name
                       and
-                      len(name) >= 4
+                      len(name) >= 5
                       and
-                      name in candidate_upper
+                      name in upper
                   ):
-
                       return item
 
               return None
 
           # ========================================================
-          # KML GEOMETRY
+          # KML COORDINATES
           # ========================================================
 
           def parse_coordinates(
               text
           ):
 
-              coords = []
+              points = []
 
               for token in re.split(
                   r"\s+",
@@ -1051,33 +936,24 @@ jobs:
                       continue
 
                   if not (
-                      -180
-                      <= lon
-                      <= 180
+                      -180 <= lon <= 180
                       and
-                      -90
-                      <= lat
-                      <= 90
+                      -90 <= lat <= 90
                   ):
-
                       continue
 
-                  coords.append(
+                  points.append(
                       [
                           lon,
                           lat
                       ]
                   )
 
-              return coords
+              return points
 
-          def geometry_from_element(
+          def geometry_from_placemark(
               placemark
           ):
-
-              # ----------------------------------------------------
-              # Polygon
-              # ----------------------------------------------------
 
               polygons = []
 
@@ -1086,7 +962,6 @@ jobs:
                   if local(
                       polygon.tag
                   ) != "Polygon":
-
                       continue
 
                   rings = []
@@ -1096,33 +971,28 @@ jobs:
                       if local(
                           ring.tag
                       ) != "LinearRing":
-
                           continue
 
-                      coordinates = None
+                      coordinate_text = None
 
-                      for node in ring:
+                      for child in ring:
 
-                          if (
-                              local(
-                                  node.tag
-                              )
-                              ==
-                              "coordinates"
-                          ):
+                          if local(
+                              child.tag
+                          ) == "coordinates":
 
-                              coordinates = (
-                                  node.text
+                              coordinate_text = (
+                                  child.text
                                   or ""
                               )
 
                               break
 
-                      if not coordinates:
+                      if not coordinate_text:
                           continue
 
                       points = parse_coordinates(
-                          coordinates
+                          coordinate_text
                       )
 
                       if len(points) < 3:
@@ -1144,107 +1014,23 @@ jobs:
                           rings
                       )
 
-              if polygons:
+              if not polygons:
+                  return None
 
-                  if len(polygons) == 1:
-
-                      return {
-                          "type": "Polygon",
-                          "coordinates": polygons[0]
-                      }
+              if len(polygons) == 1:
 
                   return {
-                      "type": "MultiPolygon",
-                      "coordinates": polygons
+                      "type": "Polygon",
+                      "coordinates": polygons[0]
                   }
 
-              # ----------------------------------------------------
-              # MultiGeometry
-              # ----------------------------------------------------
-
-              multi_polygons = []
-
-              for child in placemark.iter():
-
-                  if local(
-                      child.tag
-                  ) != "MultiGeometry":
-
-                      continue
-
-                  for polygon in child.iter():
-
-                      if local(
-                          polygon.tag
-                      ) != "Polygon":
-
-                          continue
-
-                      rings = []
-
-                      for ring in polygon.iter():
-
-                          if local(
-                              ring.tag
-                          ) != "LinearRing":
-
-                              continue
-
-                          coordinates = None
-
-                          for node in ring:
-
-                              if (
-                                  local(
-                                      node.tag
-                                  )
-                                  ==
-                                  "coordinates"
-                              ):
-
-                                  coordinates = (
-                                      node.text
-                                      or ""
-                                  )
-
-                                  break
-
-                          if not coordinates:
-                              continue
-
-                          points = parse_coordinates(
-                              coordinates
-                          )
-
-                          if len(points) >= 3:
-
-                              if points[0] != points[-1]:
-
-                                  points.append(
-                                      points[0]
-                                  )
-
-                              rings.append(
-                                  points
-                              )
-
-                      if rings:
-
-                          multi_polygons.append(
-                              rings
-                          )
-
-              if multi_polygons:
-
-                  return {
-                      "type": "MultiPolygon",
-                      "coordinates": multi_polygons
-                  }
-
-              return None
+              return {
+                  "type": "MultiPolygon",
+                  "coordinates": polygons
+              }
 
           # ========================================================
-          # READ ALL KML FILES
+          # PROCESS ALL KML FILES
           # ========================================================
 
           kml_files = sorted(
@@ -1254,15 +1040,9 @@ jobs:
           )
 
           print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "NATS KML AIRSPACE CONVERSION"
-          )
-          print(
-              "=========================================="
-          )
+          print("==========================================")
+          print("NATS KML AIRSPACE CONVERSION")
+          print("==========================================")
 
           print(
               "AIRAC:",
@@ -1277,7 +1057,7 @@ jobs:
           if not kml_files:
 
               raise SystemExit(
-                  "ERROR: No NATS KML files found."
+                  "ERROR: No final KML files found."
               )
 
           features = []
@@ -1285,36 +1065,20 @@ jobs:
           placemark_count = 0
           geometry_count = 0
           filtered_count = 0
-          unmatched_count = 0
 
-          category_counts = {}
-          unmatched_examples = []
+          categories = {}
 
           for kml_file in kml_files:
 
+              print("")
               print(
                   "Reading:",
                   kml_file
               )
 
-              try:
-
-                  tree = ET.parse(
-                      kml_file
-                  )
-
-              except Exception as exc:
-
-                  print(
-                      "WARNING: Failed to parse:",
-                      kml_file
-                  )
-
-                  print(
-                      repr(exc)
-                  )
-
-                  continue
+              tree = ET.parse(
+                  kml_file
+              )
 
               root = tree.getroot()
 
@@ -1323,98 +1087,81 @@ jobs:
                   if local(
                       placemark.tag
                   ) != "Placemark":
-
                       continue
 
                   placemark_count += 1
 
                   name = ""
 
-                  for node in placemark:
+                  for child in placemark:
 
-                      if (
-                          local(
-                              node.tag
-                          )
-                          ==
-                          "name"
-                      ):
+                      if local(
+                          child.tag
+                      ) == "name":
 
                           name = clean(
-                              node.text
+                              child.text
                               or ""
                           )
 
                           break
 
-                  full_text = combined_text(
-                      placemark
+                  all_text = []
+
+                  for node in placemark.iter():
+
+                      if node.text:
+
+                          value = clean(
+                              node.text
+                          )
+
+                          if value:
+                              all_text.append(
+                                  value
+                              )
+
+                  placemark_text = " ".join(
+                      all_text
                   )
 
-                  xml_match = find_xml_metadata(
-                      full_text
-                  )
-
-                  xml_text = (
-                      xml_match["text"]
-                      if xml_match
-                      else ""
-                  )
-
-                  xml_category = (
-                      xml_match["category"]
-                      if xml_match
-                      else None
-                  )
-
-                  classification_text = (
-                      name
-                      + " "
-                      + full_text
-                      + " "
-                      + xml_text
+                  metadata = xml_match(
+                      placemark_text
                   )
 
                   category = classify(
-                      classification_text
+                      placemark_text
                   )
 
-                  if category is None:
+                  if category is None and metadata:
 
-                      category = xml_category
+                      category = metadata[
+                          "category"
+                      ]
+
+                  # ------------------------------------------------
+                  # OMIT EVERYTHING OUTSIDE OUR CURRENT DATASET
+                  # ------------------------------------------------
 
                   if category is None:
 
                       filtered_count += 1
 
-                      if len(
-                          unmatched_examples
-                      ) < 25:
-
-                          unmatched_examples.append(
-                              name
-                              or
-                              full_text[:200]
-                          )
-
-                      unmatched_count += 1
-
                       continue
 
-                  geometry = geometry_from_element(
+                  geometry = geometry_from_placemark(
                       placemark
                   )
 
                   if geometry is None:
-
                       continue
 
                   geometry_count += 1
 
-                  category_counts[
+                  categories[
                       category
                   ] = (
-                      category_counts.get(
+                      categories.get(
                           category,
                           0
                       )
@@ -1426,38 +1173,29 @@ jobs:
                           name
                           or
                           (
-                              xml_match["name"]
-                              if xml_match
-                              else "Unknown airspace"
+                              metadata["name"]
+                              if metadata
+                              else
+                              "Unknown airspace"
                           )
                       ),
                       "category": category,
                       "source": (
-                          "NATS UK ICAO AIP KML"
+                          "NATS UK ICAO AIP"
                       ),
                       "airac": AIRAC
                   }
 
-                  if xml_match:
+                  if metadata:
 
-                      if xml_match[
+                      if metadata[
                           "designator"
                       ]:
 
                           properties[
                               "designator"
-                          ] = xml_match[
+                          ] = metadata[
                               "designator"
-                          ]
-
-                      if xml_match[
-                          "name"
-                      ]:
-
-                          properties[
-                              "aipName"
-                          ] = xml_match[
-                              "name"
                           ]
 
                   features.append(
@@ -1468,20 +1206,10 @@ jobs:
                       }
                   )
 
-          # ========================================================
-          # SUMMARY
-          # ========================================================
-
           print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "NATS KML CONVERSION RESULT"
-          )
-          print(
-              "=========================================="
-          )
+          print("==========================================")
+          print("AIRSPACE CONVERSION RESULT")
+          print("==========================================")
 
           print("")
           print(
@@ -1490,12 +1218,12 @@ jobs:
           )
 
           print(
-              "Placemark geometries:",
+              "Valid geometries:",
               geometry_count
           )
 
           print(
-              "Filtered/unclassified:",
+              "Filtered:",
               filtered_count
           )
 
@@ -1505,9 +1233,7 @@ jobs:
           )
 
           print("")
-          print(
-              "AviMap airspace categories:"
-          )
+          print("Categories:")
 
           for category in [
               "A",
@@ -1528,51 +1254,26 @@ jobs:
 
               print(
                   f"  {category}: "
-                  f"{category_counts.get(category, 0)}"
+                  f"{categories.get(category, 0)}"
               )
 
-          print("")
-
-          if unmatched_examples:
-
-              print(
-                  "Examples of unclassified KML placemarks:"
-              )
-
-              for example in unmatched_examples:
-
-                  print(
-                      "  -",
-                      example
-                  )
-
-          # ========================================================
-          # SAFETY CHECKS
-          # ========================================================
+          # --------------------------------------------------------
+          # SAFETY
+          # --------------------------------------------------------
 
           if not features:
 
               raise SystemExit(
                   "ERROR: NATS KML conversion produced "
-                  "zero filtered airspace geometries."
+                  "zero valid airspace geometries."
               )
 
           if len(features) < 100:
 
               raise SystemExit(
                   "ERROR: Suspiciously small NATS "
-                  f"airspace dataset: {len(features)} features."
+                  f"airspace dataset: {len(features)}."
               )
-
-          # We specifically expect at least some airspace
-          # categories beyond generic class data.
-          #
-          # This is diagnostic only: do not fail if a particular
-          # category genuinely has zero records in a future AIRAC.
-          print("")
-          print(
-              "KML airspace conversion passed safety checks."
-          )
 
           OUT.write_text(
               json.dumps(
@@ -1644,33 +1345,6 @@ jobs:
           fields = list(
               rows[0].keys()
           )
-
-          print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "NATS VRP CSV"
-          )
-          print(
-              "=========================================="
-          )
-
-          print(
-              "CSV records:",
-              len(rows)
-          )
-
-          print(
-              "CSV fields:"
-          )
-
-          for field in fields:
-
-              print(
-                  "  ",
-                  field
-              )
 
           def norm(value):
 
@@ -1755,28 +1429,8 @@ jobs:
 
               raise SystemExit(
                   "ERROR: Could not identify NATS VRP "
-                  f"coordinate fields. Fields: {fields}"
+                  f"coordinate fields: {fields}"
               )
-
-          print("")
-          print(
-              "Detected fields:"
-          )
-
-          print(
-              "  Name:",
-              name_field
-          )
-
-          print(
-              "  Latitude:",
-              lat_field
-          )
-
-          print(
-              "  Longitude:",
-              lon_field
-          )
 
           def parse_coord(
               value,
@@ -1847,15 +1501,6 @@ jobs:
                               number
                           )
 
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
-
-                          number = abs(
-                              number
-                          )
-
                       return number
 
               except ValueError:
@@ -1882,130 +1527,106 @@ jobs:
                   )
               )
 
-              if re.fullmatch(
-                  r"\d+(?:\.\d+)?",
-                  compact
-              ):
+              try:
 
-                  try:
+                  if "." in compact:
 
-                      if "." in compact:
-
-                          integer_part, decimal_part = (
-                              compact.split(
-                                  ".",
-                                  1
-                              )
+                      integer_part, decimal_part = (
+                          compact.split(
+                              ".",
+                              1
                           )
-
-                      else:
-
-                          integer_part = compact
-                          decimal_part = ""
-
-                      if latitude:
-
-                          if len(
-                              integer_part
-                          ) < 6:
-
-                              raise ValueError
-
-                          degrees = int(
-                              integer_part[:2]
-                          )
-
-                          minutes = int(
-                              integer_part[2:4]
-                          )
-
-                          seconds_text = (
-                              integer_part[4:]
-                          )
-
-                      else:
-
-                          if len(
-                              integer_part
-                          ) < 7:
-
-                              raise ValueError
-
-                          degrees = int(
-                              integer_part[:3]
-                          )
-
-                          minutes = int(
-                              integer_part[3:5]
-                          )
-
-                          seconds_text = (
-                              integer_part[5:]
-                          )
-
-                      if decimal_part:
-
-                          seconds_text += (
-                              "."
-                              + decimal_part
-                          )
-
-                      seconds = float(
-                          seconds_text
                       )
 
-                      limit = (
-                          90
-                          if latitude
-                          else 180
+                  else:
+
+                      integer_part = compact
+                      decimal_part = ""
+
+                  if latitude:
+
+                      if len(
+                          integer_part
+                      ) < 6:
+
+                          return None
+
+                      degrees = int(
+                          integer_part[:2]
                       )
 
-                      if (
-                          degrees > limit
-                          or
-                          minutes >= 60
-                          or
-                          seconds >= 60
-                      ):
-
-                          raise ValueError
-
-                      result = (
-                          degrees
-                          +
-                          minutes / 60
-                          +
-                          seconds / 3600
+                      minutes = int(
+                          integer_part[2:4]
                       )
 
-                      if hemisphere in (
-                          "S",
-                          "W"
-                      ):
+                      seconds_text = (
+                          integer_part[4:]
+                      )
 
-                          result = -abs(
-                              result
-                          )
+                  else:
 
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
+                      if len(
+                          integer_part
+                      ) < 7:
 
-                          result = abs(
-                              result
-                          )
+                          return None
 
-                      return result
+                      degrees = int(
+                          integer_part[:3]
+                      )
 
-                  except (
-                      ValueError,
-                      IndexError
+                      minutes = int(
+                          integer_part[3:5]
+                      )
+
+                      seconds_text = (
+                          integer_part[5:]
+                      )
+
+                  if decimal_part:
+
+                      seconds_text += (
+                          "."
+                          + decimal_part
+                      )
+
+                  seconds = float(
+                      seconds_text
+                  )
+
+                  if (
+                      minutes >= 60
+                      or
+                      seconds >= 60
                   ):
 
-                      pass
+                      return None
 
-              return None
+                  result = (
+                      degrees
+                      +
+                      minutes / 60
+                      +
+                      seconds / 3600
+                  )
+
+                  if hemisphere in (
+                      "S",
+                      "W"
+                  ):
+
+                      result = -abs(
+                          result
+                      )
+
+                  return result
+
+              except (
+                  ValueError,
+                  IndexError
+              ):
+
+                  return None
 
           features = []
           invalid = 0
@@ -2038,15 +1659,6 @@ jobs:
                   invalid += 1
                   continue
 
-              if not (
-                  -90 <= lat <= 90
-                  and
-                  -180 <= lon <= 180
-              ):
-
-                  invalid += 1
-                  continue
-
               name = (
                   str(
                       row.get(
@@ -2065,11 +1677,9 @@ jobs:
               )
 
               properties = {
-                  str(
-                      key
-                  ).strip(): value
-                  for key, value in row.items()
-                  if key
+                  str(k).strip(): v
+                  for k, v in row.items()
+                  if k
               }
 
               properties[
@@ -2105,15 +1715,9 @@ jobs:
               )
 
           print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "VRP CONVERSION RESULT"
-          )
-          print(
-              "=========================================="
-          )
+          print("==========================================")
+          print("VRP CONVERSION RESULT")
+          print("==========================================")
 
           print(
               "CSV records:",
@@ -2126,7 +1730,7 @@ jobs:
           )
 
           print(
-              "Invalid coordinates:",
+              "Invalid:",
               invalid
           )
 
@@ -2134,8 +1738,7 @@ jobs:
 
               raise SystemExit(
                   "ERROR: NATS VRP conversion produced "
-                  "zero features. Existing repository data "
-                  "will NOT be replaced."
+                  "zero valid points."
               )
 
           Path(
@@ -2158,14 +1761,13 @@ jobs:
           PY
 
       # ============================================================
-      # VALIDATE GENERATED DATA
+      # VALIDATE
       # ============================================================
 
       - name: Validate generated NATS data
         run: |
           set -euo pipefail
 
-          echo ""
           echo "=========================================="
           echo "VALIDATING GENERATED NATS DATA"
           echo "=========================================="
@@ -2189,18 +1791,11 @@ jobs:
           )
 
           echo ""
-          echo "Airspaces:"
-          echo "$AIRSPACE_COUNT"
-
-          echo ""
-          echo "VRPs:"
-          echo "$VRP_COUNT"
+          echo "Airspaces: $AIRSPACE_COUNT"
+          echo "VRPs:      $VRP_COUNT"
 
           test "$AIRSPACE_COUNT" -gt 0
           test "$VRP_COUNT" -gt 0
-
-          echo ""
-          echo "Checking GeoJSON structure..."
 
           jq -e \
             '.type == "FeatureCollection"' \
@@ -2223,11 +1818,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo ""
-          echo "=========================================="
-          echo "Installing validated aviation data"
-          echo "=========================================="
-
           mkdir -p data
 
           cp \
@@ -2245,17 +1835,12 @@ jobs:
             data/uk-reporting-points.geojson
 
       # ============================================================
-      # COMMIT ONLY IF CHANGED
+      # COMMIT
       # ============================================================
 
       - name: Commit updated NATS aviation data
         run: |
           set -euo pipefail
-
-          echo ""
-          echo "=========================================="
-          echo "COMMITTING NATS AVIATION DATA"
-          echo "=========================================="
 
           git config \
             user.name \
@@ -2273,30 +1858,19 @@ jobs:
             --cached \
             --quiet; then
 
-            echo ""
             echo "No aviation-data changes detected."
 
             exit 0
 
           fi
 
-          echo ""
-          echo "Changes:"
+          AIRAC=$(cat /tmp/nats-aip-date.txt)
+
           git diff \
             --cached \
             --stat
-
-          AIRAC=$(cat /tmp/nats-aip-date.txt)
 
           git commit \
             -m "Update UK aviation data from NATS AIS ${AIRAC}"
 
           git push
-
-          echo ""
-          echo "=========================================="
-          echo "NATS AVIATION DATA UPDATED"
-          echo "=========================================="
-          echo ""
-          echo "AIRAC:"
-          echo "$AIRAC"
