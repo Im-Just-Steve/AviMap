@@ -1,1540 +1,1540 @@
-      # ============================================================
-      # CONVERT NATS VRPS
-      #
-      # TARGETED VRP REPAIR
-      #
-      # The AIXM airspace importer above is deliberately unchanged.
-      #
-      # NATS VRP releases can vary in:
-      #   - delimiter
-      #   - header position
-      #   - column names
-      #   - coordinate format
-      #
-      # This importer detects those variations and logs exactly what
-      # NATS supplied.
-      # ============================================================
+# ============================================================
+# CONVERT NATS VRPS
+#
+# TARGETED VRP REPAIR
+#
+# The AIXM airspace importer above is deliberately unchanged.
+#
+# NATS VRP releases can vary in:
+#   - delimiter
+#   - header position
+#   - column names
+#   - coordinate format
+#
+# This importer detects those variations and logs exactly what
+# NATS supplied.
+# ============================================================
 
-      - name: Convert NATS VRPs to GeoJSON
-        run: |
-          set -euo pipefail
+- name: Convert NATS VRPs to GeoJSON
+run: |
+set -euo pipefail
 
-          python3 <<'PY'
-          import csv
-          import json
-          import re
+python3 <<'PY'
+import csv
+import json
+import re
 
-          from pathlib import Path
+from pathlib import Path
 
 
-          INPUT = Path(
-              "/tmp/uk-vrps.csv"
-          )
+INPUT = Path(
+    "/tmp/uk-vrps.csv"
+)
 
-          OUTPUT = Path(
-              "/tmp/avimap-data/"
-              "uk-reporting-points.geojson"
-          )
+OUTPUT = Path(
+    "/tmp/avimap-data/"
+    "uk-reporting-points.geojson"
+)
 
 
-          # ========================================================
-          # READ SOURCE
-          # ========================================================
+# ========================================================
+# READ SOURCE
+# ========================================================
 
-          raw = INPUT.read_text(
-              encoding="utf-8-sig",
-              errors="replace"
-          )
+raw = INPUT.read_text(
+    encoding="utf-8-sig",
+    errors="replace"
+)
 
 
-          if not raw.strip():
+if not raw.strip():
 
-              raise SystemExit(
-                  "ERROR: NATS VRP CSV is empty."
-              )
+    raise SystemExit(
+        "ERROR: NATS VRP CSV is empty."
+    )
 
 
-          print("")
-          print(
-              "=========================================="
-          )
+print("")
+print(
+    "=========================================="
+)
 
-          print(
-              "NATS VRP IMPORT"
-          )
+print(
+    "NATS VRP IMPORT"
+)
 
-          print(
-              "=========================================="
-          )
+print(
+    "=========================================="
+)
 
-          print("")
-          print(
-              "Source:",
-              INPUT
-          )
+print("")
+print(
+    "Source:",
+    INPUT
+)
 
-          print(
-              "Bytes:",
-              len(
-                  raw.encode(
-                      "utf-8"
-                  )
-              )
-          )
+print(
+    "Bytes:",
+    len(
+        raw.encode(
+            "utf-8"
+        )
+    )
+)
 
 
-          # ========================================================
-          # SHOW RAW FIRST LINES
-          # ========================================================
+# ========================================================
+# SHOW RAW FIRST LINES
+# ========================================================
 
-          print("")
-          print(
-              "First 10 source lines:"
-          )
+print("")
+print(
+    "First 10 source lines:"
+)
 
-          for number, line in enumerate(
-              raw.splitlines()[:10],
-              start=1
-          ):
+for number, line in enumerate(
+    raw.splitlines()[:10],
+    start=1
+):
 
-              print(
-                  f"{number:02d}: {line[:500]}"
-              )
+    print(
+        f"{number:02d}: {line[:500]}"
+    )
 
 
-          # ========================================================
-          # DETECT DELIMITER
-          # ========================================================
+# ========================================================
+# DETECT DELIMITER
+# ========================================================
 
-          sample = raw[
-              :20000
-          ]
+sample = raw[
+    :20000
+]
 
 
-          try:
+try:
 
-              dialect = csv.Sniffer().sniff(
-                  sample,
-                  delimiters=",;\t|"
-              )
+    dialect = csv.Sniffer().sniff(
+        sample,
+        delimiters=",;\t|"
+    )
 
-              delimiter = dialect.delimiter
+    delimiter = dialect.delimiter
 
-          except csv.Error:
+except csv.Error:
 
-              # NATS normally uses comma-separated CSV.
+    # NATS normally uses comma-separated CSV.
 
-              delimiter = ","
+    delimiter = ","
 
 
-              class FallbackDialect(
-                  csv.excel
-              ):
+    class FallbackDialect(
+        csv.excel
+    ):
 
-                  pass
+        pass
 
 
-              dialect = FallbackDialect()
+    dialect = FallbackDialect()
 
 
-          delimiter_name = {
-              ",": "comma",
-              ";": "semicolon",
-              "\t": "tab",
-              "|": "pipe"
-          }.get(
-              delimiter,
-              repr(
-                  delimiter
-              )
-          )
+delimiter_name = {
+    ",": "comma",
+    ";": "semicolon",
+    "\t": "tab",
+    "|": "pipe"
+}.get(
+    delimiter,
+    repr(
+        delimiter
+    )
+)
 
 
-          print("")
-          print(
-              "Detected delimiter:",
-              delimiter_name
-          )
+print("")
+print(
+    "Detected delimiter:",
+    delimiter_name
+)
 
 
-          # ========================================================
-          # HEADER DETECTION
-          #
-          # Some CSV exports contain introductory lines before the
-          # actual table header.
-          # ========================================================
+# ========================================================
+# HEADER DETECTION
+#
+# Some CSV exports contain introductory lines before the
+# actual table header.
+# ========================================================
 
-          lines = raw.splitlines()
+lines = raw.splitlines()
 
 
-          def likely_header(
-              line
-          ):
+def likely_header(
+    line
+):
 
-              lower = line.lower()
+    lower = line.lower()
 
 
-              coordinate_words = (
-                  "latitude",
-                  "longitude",
-                  "lat",
-                  "lon",
-                  "long",
-                  "vrp",
-                  "name",
-                  "point"
-              )
+    coordinate_words = (
+        "latitude",
+        "longitude",
+        "lat",
+        "lon",
+        "long",
+        "vrp",
+        "name",
+        "point"
+    )
 
 
-              score = sum(
-                  1
-                  for word in coordinate_words
-                  if word in lower
-              )
+    score = sum(
+        1
+        for word in coordinate_words
+        if word in lower
+    )
 
 
-              return score >= 2
+    return score >= 2
 
 
-          header_index = None
+header_index = None
 
 
-          for index, line in enumerate(
-              lines
-          ):
+for index, line in enumerate(
+    lines
+):
 
-              if likely_header(
-                  line
-              ):
+    if likely_header(
+        line
+    ):
 
-                  header_index = index
+        header_index = index
 
-                  break
+        break
 
 
-          if header_index is None:
+if header_index is None:
 
-              header_index = 0
+    header_index = 0
 
 
-          print(
-              "Detected header row:",
-              header_index + 1
-          )
+print(
+    "Detected header row:",
+    header_index + 1
+)
 
 
-          if header_index > 0:
+if header_index > 0:
 
-              print(
-                  "Skipped introductory lines:",
-                  header_index
-              )
+    print(
+        "Skipped introductory lines:",
+        header_index
+    )
 
 
-          csv_text = "\n".join(
-              lines[
-                  header_index:
-              ]
-          )
+csv_text = "\n".join(
+    lines[
+        header_index:
+    ]
+)
 
 
-          reader = csv.DictReader(
-              csv_text.splitlines(),
-              delimiter=delimiter
-          )
+reader = csv.DictReader(
+    csv_text.splitlines(),
+    delimiter=delimiter
+)
 
 
-          rows = list(
-              reader
-          )
+rows = list(
+    reader
+)
 
 
-          if not rows:
+if not rows:
 
-              raise SystemExit(
-                  "ERROR: NATS VRP CSV contains zero data rows."
-              )
+    raise SystemExit(
+        "ERROR: NATS VRP CSV contains zero data rows."
+    )
 
 
-          fields = [
-              field
-              for field in reader.fieldnames or []
-              if field is not None
-          ]
+fields = [
+    field
+    for field in reader.fieldnames or []
+    if field is not None
+]
 
 
-          print("")
-          print(
-              "Detected CSV fields:"
-          )
+print("")
+print(
+    "Detected CSV fields:"
+)
 
 
-          for field in fields:
+for field in fields:
 
-              print(
-                  "  ",
-                  repr(
-                      field
-                  )
-              )
+    print(
+        "  ",
+        repr(
+            field
+        )
+    )
 
 
-          # ========================================================
-          # FIELD NORMALISATION
-          # ========================================================
+# ========================================================
+# FIELD NORMALISATION
+# ========================================================
 
-          def normalise(
-              value
-          ):
+def normalise(
+    value
+):
 
-              return re.sub(
-                  r"[^a-z0-9]",
-                  "",
-                  str(
-                      value or ""
-                  ).strip().lower()
-              )
+    return re.sub(
+        r"[^a-z0-9]",
+        "",
+        str(
+            value or ""
+        ).strip().lower()
+    )
 
 
-          normalised = {
-              normalise(field):
-                  field
-              for field in fields
-              if field
-          }
+normalised = {
+    normalise(field):
+        field
+    for field in fields
+    if field
+}
 
 
-          def find_field(
-              candidates
-          ):
+def find_field(
+    candidates
+):
 
-              # Exact normalised match.
+    # Exact normalised match.
 
-              for candidate in candidates:
+    for candidate in candidates:
 
-                  key = normalise(
-                      candidate
-                  )
+        key = normalise(
+            candidate
+        )
 
 
-                  if key in normalised:
+        if key in normalised:
 
-                      return normalised[
-                          key
-                      ]
+            return normalised[
+                key
+            ]
 
 
-              # Partial match.
+    # Partial match.
 
-              for key, original in normalised.items():
+    for key, original in normalised.items():
 
-                  for candidate in candidates:
+        for candidate in candidates:
 
-                      candidate_key = normalise(
-                          candidate
-                      )
+            candidate_key = normalise(
+                candidate
+            )
 
 
-                      if (
-                          candidate_key
-                          in
-                          key
-                      ):
+            if (
+                candidate_key
+                in
+                key
+            ):
 
-                          return original
+                return original
 
 
-              return None
+    return None
 
 
-          name_field = find_field(
-              [
-                  "VRP Name",
-                  "VRPName",
-                  "VRP",
-                  "Name",
-                  "Designator",
-                  "Identifier",
-                  "Point Name",
-                  "Point",
-                  "Location",
-                  "Location Name"
-              ]
-          )
+name_field = find_field(
+    [
+        "VRP Name",
+        "VRPName",
+        "VRP",
+        "Name",
+        "Designator",
+        "Identifier",
+        "Point Name",
+        "Point",
+        "Location",
+        "Location Name"
+    ]
+)
 
 
-          lat_field = find_field(
-              [
-                  "Latitude",
-                  "Lat",
-                  "Latitude DD",
-                  "Latitude Decimal",
-                  "Latitude DMS",
-                  "Lat DMS",
-                  "Lat DD",
-                  "Lat Dec"
-              ]
-          )
+lat_field = find_field(
+    [
+        "Latitude",
+        "Lat",
+        "Latitude DD",
+        "Latitude Decimal",
+        "Latitude DMS",
+        "Lat DMS",
+        "Lat DD",
+        "Lat Dec"
+    ]
+)
 
 
-          lon_field = find_field(
-              [
-                  "Longitude",
-                  "Lon",
-                  "Long",
-                  "Longitude DD",
-                  "Longitude Decimal",
-                  "Longitude DMS",
-                  "Lon DMS",
-                  "Lon DD",
-                  "Long DD",
-                  "Long Dec"
-              ]
-          )
+lon_field = find_field(
+    [
+        "Longitude",
+        "Lon",
+        "Long",
+        "Longitude DD",
+        "Longitude Decimal",
+        "Longitude DMS",
+        "Lon DMS",
+        "Lon DD",
+        "Long DD",
+        "Long Dec"
+    ]
+)
 
 
-          print("")
-          print(
-              "Detected fields:"
-          )
+print("")
+print(
+    "Detected fields:"
+)
 
-          print(
-              "  Name:",
-              repr(
-                  name_field
-              )
-          )
+print(
+    "  Name:",
+    repr(
+        name_field
+    )
+)
 
-          print(
-              "  Latitude:",
-              repr(
-                  lat_field
-              )
-          )
+print(
+    "  Latitude:",
+    repr(
+        lat_field
+    )
+)
 
-          print(
-              "  Longitude:",
-              repr(
-                  lon_field
-              )
-          )
+print(
+    "  Longitude:",
+    repr(
+        lon_field
+    )
+)
 
 
-          # ========================================================
-          # FALLBACK FIELD SEARCH
-          #
-          # If the column names aren't conventional, look for
-          # columns whose values actually resemble coordinates.
-          # ========================================================
+# ========================================================
+# FALLBACK FIELD SEARCH
+#
+# If the column names aren't conventional, look for
+# columns whose values actually resemble coordinates.
+# ========================================================
 
-          def coordinate_like(
-              value,
-              latitude
-          ):
+def coordinate_like(
+    value,
+    latitude
+):
 
-              if value is None:
+    if value is None:
 
-                  return False
+        return False
 
 
-              text = str(
-                  value
-              ).strip()
+    text = str(
+        value
+    ).strip()
 
 
-              if not text:
+    if not text:
 
-                  return False
+        return False
 
 
-              # Hemisphere notation.
+    # Hemisphere notation.
 
-              if re.search(
-                  r"[NSEW]\s*$",
-                  text,
-                  flags=re.I
-              ):
+    if re.search(
+        r"[NSEW]\s*$",
+        text,
+        flags=re.I
+    ):
 
-                  return True
+        return True
 
 
-              # Plain decimal.
+    # Plain decimal.
 
-              try:
+    try:
 
-                  number = float(
-                      text.replace(
-                          ",",
-                          "."
-                      )
-                  )
+        number = float(
+            text.replace(
+                ",",
+                "."
+            )
+        )
 
 
-                  limit = (
-                      90
-                      if latitude
-                      else
-                      180
-                  )
+        limit = (
+            90
+            if latitude
+            else
+            180
+        )
 
 
-                  if (
-                      -limit
-                      <= number
-                      <= limit
-                  ):
+        if (
+            -limit
+            <= number
+            <= limit
+        ):
 
-                      return True
+            return True
 
-              except ValueError:
+    except ValueError:
 
-                  pass
+        pass
 
 
-              # DMS / compact DMS.
+    # DMS / compact DMS.
 
-              digits = re.sub(
-                  r"[^0-9.]",
-                  "",
-                  text
-              )
+    digits = re.sub(
+        r"[^0-9.]",
+        "",
+        text
+    )
 
 
-              if latitude:
+    if latitude:
 
-                  return (
-                      len(
-                          digits.replace(
-                              ".",
-                              ""
-                          )
-                      )
-                      >=
-                      6
-                  )
+        return (
+            len(
+                digits.replace(
+                    ".",
+                    ""
+                )
+            )
+            >=
+            6
+        )
 
-              return (
-                  len(
-                      digits.replace(
-                          ".",
-                          ""
-                      )
-                  )
-                  >=
-                  7
-              )
+    return (
+        len(
+            digits.replace(
+                ".",
+                ""
+            )
+        )
+        >=
+        7
+    )
 
 
-          if (
-              lat_field is None
-              or
-              lon_field is None
-          ):
+if (
+    lat_field is None
+    or
+    lon_field is None
+):
 
-              print("")
-              print(
-                  "Named coordinate fields were not both found."
-              )
+    print("")
+    print(
+        "Named coordinate fields were not both found."
+    )
 
-              print(
-                  "Attempting value-based coordinate detection..."
-              )
+    print(
+        "Attempting value-based coordinate detection..."
+    )
 
 
-              for field in fields:
+    for field in fields:
 
-                  values = [
-                      row.get(
-                          field
-                      )
-                      for row in rows[
-                          :25
-                      ]
-                  ]
+        values = [
+            row.get(
+                field
+            )
+            for row in rows[
+                :25
+            ]
+        ]
 
 
-                  latitude_hits = sum(
-                      coordinate_like(
-                          value,
-                          True
-                      )
-                      for value in values
-                  )
+        latitude_hits = sum(
+            coordinate_like(
+                value,
+                True
+            )
+            for value in values
+        )
 
 
-                  longitude_hits = sum(
-                      coordinate_like(
-                          value,
-                          False
-                      )
-                      for value in values
-                  )
+        longitude_hits = sum(
+            coordinate_like(
+                value,
+                False
+            )
+            for value in values
+        )
 
 
-                  if (
-                      lat_field is None
-                      and
-                      latitude_hits >= max(
-                          3,
-                          len(
-                              values
-                          ) // 2
-                      )
-                  ):
+        if (
+            lat_field is None
+            and
+            latitude_hits >= max(
+                3,
+                len(
+                    values
+                ) // 2
+            )
+        ):
 
-                      lat_field = field
+            lat_field = field
 
 
-                  if (
-                      lon_field is None
-                      and
-                      longitude_hits >= max(
-                          3,
-                          len(
-                              values
-                          ) // 2
-                      )
-                  ):
+        if (
+            lon_field is None
+            and
+            longitude_hits >= max(
+                3,
+                len(
+                    values
+                ) // 2
+            )
+        ):
 
-                      if field != lat_field:
+            if field != lat_field:
 
-                          lon_field = field
+                lon_field = field
 
 
-          print("")
-          print(
-              "Final coordinate fields:"
-          )
+print("")
+print(
+    "Final coordinate fields:"
+)
 
-          print(
-              "  Latitude:",
-              repr(
-                  lat_field
-              )
-          )
+print(
+    "  Latitude:",
+    repr(
+        lat_field
+    )
+)
 
-          print(
-              "  Longitude:",
-              repr(
-                  lon_field
-              )
-          )
+print(
+    "  Longitude:",
+    repr(
+        lon_field
+    )
+)
 
 
-          if (
-              lat_field is None
-              or
-              lon_field is None
-          ):
+if (
+    lat_field is None
+    or
+    lon_field is None
+):
 
-              print("")
-              print(
-                  "ERROR: Unable to identify NATS VRP coordinate fields."
-              )
+    print("")
+    print(
+        "ERROR: Unable to identify NATS VRP coordinate fields."
+    )
 
-              print("")
-              print(
-                  "Available fields:"
-              )
+    print("")
+    print(
+        "Available fields:"
+    )
 
-              for field in fields:
+    for field in fields:
 
-                  print(
-                      "  ",
-                      repr(
-                          field
-                      )
-                  )
+        print(
+            "  ",
+            repr(
+                field
+            )
+        )
 
 
-              print("")
-              print(
-                  "First five rows:"
-              )
+    print("")
+    print(
+        "First five rows:"
+    )
 
 
-              for row in rows[
-                  :5
-              ]:
+    for row in rows[
+        :5
+    ]:
 
-                  print(
-                      row
-                  )
+        print(
+            row
+        )
 
 
-              raise SystemExit(
-                  "ERROR: NATS VRP coordinate fields could not be detected."
-              )
+    raise SystemExit(
+        "ERROR: NATS VRP coordinate fields could not be detected."
+    )
 
 
-          # ========================================================
-          # COORDINATE PARSER
-          # ========================================================
+# ========================================================
+# COORDINATE PARSER
+# ========================================================
 
-          def parse_coord(
-              value,
-              latitude
-          ):
+def parse_coord(
+    value,
+    latitude
+):
 
-              if value is None:
+    if value is None:
 
-                  return None
+        return None
 
 
-              text = str(
-                  value
-              ).strip()
+    text = str(
+        value
+    ).strip()
 
 
-              if not text:
+    if not text:
 
-                  return None
+        return None
 
 
-              # ----------------------------------------------------
-              # Extract hemisphere.
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # Extract hemisphere.
+    # ----------------------------------------------------
 
-              hemisphere = None
+    hemisphere = None
 
 
-              match = re.search(
-                  r"([NSEW])\s*$",
-                  text,
-                  flags=re.I
-              )
+    match = re.search(
+        r"([NSEW])\s*$",
+        text,
+        flags=re.I
+    )
 
 
-              if match:
+    if match:
 
-                  hemisphere = (
-                      match.group(
-                          1
-                      ).upper()
-                  )
+        hemisphere = (
+            match.group(
+                1
+            ).upper()
+        )
 
 
-                  text = (
-                      text[
-                          :match.start()
-                      ]
-                      .strip()
-                  )
+        text = (
+            text[
+                :match.start()
+            ]
+            .strip()
+        )
 
 
-              # ----------------------------------------------------
-              # Decimal degrees.
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # Decimal degrees.
+    # ----------------------------------------------------
 
-              decimal_text = (
-                  text
-                  .replace(
-                      ",",
-                      "."
-                  )
-              )
+    decimal_text = (
+        text
+        .replace(
+            ",",
+            "."
+        )
+    )
 
 
-              try:
+    try:
 
-                  number = float(
-                      decimal_text
-                  )
+        number = float(
+            decimal_text
+        )
 
 
-                  limit = (
-                      90
-                      if latitude
-                      else
-                      180
-                  )
+        limit = (
+            90
+            if latitude
+            else
+            180
+        )
 
 
-                  if (
-                      -limit
-                      <= number
-                      <= limit
-                  ):
+        if (
+            -limit
+            <= number
+            <= limit
+        ):
 
-                      if hemisphere in {
-                          "S",
-                          "W"
-                      }:
+            if hemisphere in {
+                "S",
+                "W"
+            }:
 
-                          number = -abs(
-                              number
-                          )
+                number = -abs(
+                    number
+                )
 
-                      elif hemisphere in {
-                          "N",
-                          "E"
-                      }:
+            elif hemisphere in {
+                "N",
+                "E"
+            }:
 
-                          number = abs(
-                              number
-                          )
+                number = abs(
+                    number
+                )
 
 
-                      return number
+            return number
 
-              except ValueError:
+    except ValueError:
 
-                  pass
+        pass
 
 
-              # ----------------------------------------------------
-              # DMS with symbols.
-              #
-              # Examples:
-              #
-              # 512345N
-              # 51°23'45"N
-              # 51 23 45 N
-              # 51:23:45N
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # DMS with symbols.
+    #
+    # Examples:
+    #
+    # 512345N
+    # 51°23'45"N
+    # 51 23 45 N
+    # 51:23:45N
+    # ----------------------------------------------------
 
-              cleaned = (
-                  text
-                  .replace(
-                      "°",
-                      " "
-                  )
-                  .replace(
-                      "'",
-                      " "
-                  )
-                  .replace(
-                      '"',
-                      " "
-                  )
-                  .replace(
-                      ":",
-                      " "
-                  )
-                  .replace(
-                      ",",
-                      "."
-                  )
-              )
+    cleaned = (
+        text
+        .replace(
+            "°",
+            " "
+        )
+        .replace(
+            "'",
+            " "
+        )
+        .replace(
+            '"',
+            " "
+        )
+        .replace(
+            ":",
+            " "
+        )
+        .replace(
+            ",",
+            "."
+        )
+    )
 
 
-              values = re.findall(
-                  r"[-+]?\d+(?:\.\d+)?",
-                  cleaned
-              )
+    values = re.findall(
+        r"[-+]?\d+(?:\.\d+)?",
+        cleaned
+    )
 
 
-              if len(
-                  values
-              ) >= 2:
+    if len(
+        values
+    ) >= 2:
 
-                  try:
+        try:
 
-                      parts = [
-                          float(
-                              value
-                          )
-                          for value in values[
-                              :3
-                          ]
-                      ]
+            parts = [
+                float(
+                    value
+                )
+                for value in values[
+                    :3
+                ]
+            ]
 
 
-                      result = abs(
-                          parts[0]
-                      )
+            result = abs(
+                parts[0]
+            )
 
 
-                      if len(
-                          parts
-                      ) >= 2:
+            if len(
+                parts
+            ) >= 2:
 
-                          result += (
-                              abs(
-                                  parts[1]
-                              )
-                              /
-                              60.0
-                          )
+                result += (
+                    abs(
+                        parts[1]
+                    )
+                    /
+                    60.0
+                )
 
 
-                      if len(
-                          parts
-                      ) >= 3:
+            if len(
+                parts
+            ) >= 3:
 
-                          result += (
-                              abs(
-                                  parts[2]
-                              )
-                              /
-                              3600.0
-                          )
+                result += (
+                    abs(
+                        parts[2]
+                    )
+                    /
+                    3600.0
+                )
 
 
-                      limit = (
-                          90
-                          if latitude
-                          else
-                          180
-                      )
+            limit = (
+                90
+                if latitude
+                else
+                180
+            )
 
 
-                      if (
-                          result
-                          <=
-                          limit
-                      ):
+            if (
+                result
+                <=
+                limit
+            ):
 
-                          if hemisphere in {
-                              "S",
-                              "W"
-                          }:
+                if hemisphere in {
+                    "S",
+                    "W"
+                }:
 
-                              result = -result
+                    result = -result
 
 
-                          return result
+                return result
 
-                  except (
-                      ValueError,
-                      IndexError
-                  ):
+        except (
+            ValueError,
+            IndexError
+        ):
 
-                      pass
+            pass
 
 
-              # ----------------------------------------------------
-              # Compact DMS.
-              #
-              # Latitude:
-              #   DDMMSS
-              #
-              # Longitude:
-              #   DDDMMSS
-              #
-              # Decimal seconds are also accepted.
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # Compact DMS.
+    #
+    # Latitude:
+    #   DDMMSS
+    #
+    # Longitude:
+    #   DDDMMSS
+    #
+    # Decimal seconds are also accepted.
+    # ----------------------------------------------------
 
-              compact = (
-                  text
-                  .replace(
-                      "°",
-                      ""
-                  )
-                  .replace(
-                      "'",
-                      ""
-                  )
-                  .replace(
-                      '"',
-                      ""
-                  )
-                  .replace(
-                      ":",
-                      ""
-                  )
-                  .replace(
-                      " ",
-                      ""
-                  )
-              )
+    compact = (
+        text
+        .replace(
+            "°",
+            ""
+        )
+        .replace(
+            "'",
+            ""
+        )
+        .replace(
+            '"',
+            ""
+        )
+        .replace(
+            ":",
+            ""
+        )
+        .replace(
+            " ",
+            ""
+        )
+    )
 
 
-              match = re.fullmatch(
-                  r"(\d+)(?:\.(\d+))?",
-                  compact
-              )
+    match = re.fullmatch(
+        r"(\d+)(?:\.(\d+))?",
+        compact
+    )
 
 
-              if match:
+    if match:
 
-                  integer_part = (
-                      match.group(
-                          1
-                      )
-                  )
+        integer_part = (
+            match.group(
+                1
+            )
+        )
 
 
-                  decimal_part = (
-                      match.group(
-                          2
-                      )
-                      or
-                      ""
-                  )
+        decimal_part = (
+            match.group(
+                2
+            )
+            or
+            ""
+        )
 
 
-                  try:
+        try:
 
-                      if latitude:
+            if latitude:
 
-                          if len(
-                              integer_part
-                          ) < 6:
+                if len(
+                    integer_part
+                ) < 6:
 
-                              raise ValueError
+                    raise ValueError
 
 
-                          degrees = int(
-                              integer_part[
-                                  :2
-                              ]
-                          )
+                degrees = int(
+                    integer_part[
+                        :2
+                    ]
+                )
 
 
-                          minutes = int(
-                              integer_part[
-                                  2:4
-                              ]
-                          )
+                minutes = int(
+                    integer_part[
+                        2:4
+                    ]
+                )
 
 
-                          seconds_text = (
-                              integer_part[
-                                  4:
-                              ]
-                          )
+                seconds_text = (
+                    integer_part[
+                        4:
+                    ]
+                )
 
-                      else:
+            else:
 
-                          if len(
-                              integer_part
-                          ) < 7:
+                if len(
+                    integer_part
+                ) < 7:
 
-                              raise ValueError
+                    raise ValueError
 
 
-                          degrees = int(
-                              integer_part[
-                                  :3
-                              ]
-                          )
+                degrees = int(
+                    integer_part[
+                        :3
+                    ]
+                )
 
 
-                          minutes = int(
-                              integer_part[
-                                  3:5
-                              ]
-                          )
+                minutes = int(
+                    integer_part[
+                        3:5
+                    ]
+                )
 
 
-                          seconds_text = (
-                              integer_part[
-                                  5:
-                              ]
-                          )
+                seconds_text = (
+                    integer_part[
+                        5:
+                    ]
+                )
 
 
-                      if decimal_part:
+            if decimal_part:
 
-                          seconds_text += (
-                              "."
-                              +
-                              decimal_part
-                          )
+                seconds_text += (
+                    "."
+                    +
+                    decimal_part
+                )
 
 
-                      seconds = float(
-                          seconds_text
-                      )
+            seconds = float(
+                seconds_text
+            )
 
 
-                      limit = (
-                          90
-                          if latitude
-                          else
-                          180
-                      )
+            limit = (
+                90
+                if latitude
+                else
+                180
+            )
 
 
-                      if (
-                          degrees > limit
-                          or
-                          minutes >= 60
-                          or
-                          seconds >= 60
-                      ):
+            if (
+                degrees > limit
+                or
+                minutes >= 60
+                or
+                seconds >= 60
+            ):
 
-                          raise ValueError
+                raise ValueError
 
 
-                      result = (
-                          degrees
-                          +
-                          minutes / 60.0
-                          +
-                          seconds / 3600.0
-                      )
+            result = (
+                degrees
+                +
+                minutes / 60.0
+                +
+                seconds / 3600.0
+            )
 
 
-                      if hemisphere in {
-                          "S",
-                          "W"
-                      }:
+            if hemisphere in {
+                "S",
+                "W"
+            }:
 
-                          result = -abs(
-                              result
-                          )
+                result = -abs(
+                    result
+                )
 
-                      elif hemisphere in {
-                          "N",
-                          "E"
-                      }:
+            elif hemisphere in {
+                "N",
+                "E"
+            }:
 
-                          result = abs(
-                              result
-                          )
+                result = abs(
+                    result
+                )
 
 
-                      return result
+            return result
 
-                  except (
-                      ValueError,
-                      IndexError
-                  ):
+        except (
+            ValueError,
+            IndexError
+        ):
 
-                      pass
+            pass
 
 
-              return None
+    return None
 
 
-          # ========================================================
-          # CONVERT
-          # ========================================================
+# ========================================================
+# CONVERT
+# ========================================================
 
-          features = []
+features = []
 
-          invalid = 0
+invalid = 0
 
-          format_counts = {
-              "decimal": 0,
-              "dms": 0,
-              "compact_dms": 0
-          }
+format_counts = {
+    "decimal": 0,
+    "dms": 0,
+    "compact_dms": 0
+}
 
 
-          def coordinate_format(
-              value
-          ):
+def coordinate_format(
+    value
+):
 
-              if value is None:
+    if value is None:
 
-                  return "invalid"
+        return "invalid"
 
 
-              text = str(
-                  value
-              ).strip()
+    text = str(
+        value
+    ).strip()
 
 
-              if re.search(
-                  r"[°':]",
-                  text
-              ):
+    if re.search(
+        r"[°':]",
+        text
+    ):
 
-                  return "dms"
+        return "dms"
 
 
-              if re.search(
-                  r"\s",
-                  text
-              ):
+    if re.search(
+        r"\s",
+        text
+    ):
 
-                  return "dms"
+        return "dms"
 
 
-              compact = re.sub(
-                  r"[NSEW]",
-                  "",
-                  text,
-                  flags=re.I
-              )
+    compact = re.sub(
+        r"[NSEW]",
+        "",
+        text,
+        flags=re.I
+    )
 
 
-              compact = (
-                  compact
-                  .replace(
-                      ".",
-                      "",
-                      1
-                  )
-              )
+    compact = (
+        compact
+        .replace(
+            ".",
+            "",
+            1
+        )
+    )
 
 
-              if re.fullmatch(
-                  r"\d{6,}",
-                  compact
-              ):
+    if re.fullmatch(
+        r"\d{6,}",
+        compact
+    ):
 
-                  return "compact_dms"
+        return "compact_dms"
 
 
-              try:
+    try:
 
-                  float(
-                      text
-                      .replace(
-                          ",",
-                          "."
-                      )
-                  )
+        float(
+            text
+            .replace(
+                ",",
+                "."
+            )
+        )
 
-                  return "decimal"
+        return "decimal"
 
-              except ValueError:
+    except ValueError:
 
-                  return "invalid"
+        return "invalid"
 
 
-          for index, row in enumerate(
-              rows,
-              start=1
-          ):
+for index, row in enumerate(
+    rows,
+    start=1
+):
 
-              lat_value = row.get(
-                  lat_field
-              )
+    lat_value = row.get(
+        lat_field
+    )
 
 
-              lon_value = row.get(
-                  lon_field
-              )
+    lon_value = row.get(
+        lon_field
+    )
 
 
-              latitude = parse_coord(
-                  lat_value,
-                  True
-              )
+    latitude = parse_coord(
+        lat_value,
+        True
+    )
 
 
-              longitude = parse_coord(
-                  lon_value,
-                  False
-              )
+    longitude = parse_coord(
+        lon_value,
+        False
+    )
 
 
-              if (
-                  latitude is None
-                  or
-                  longitude is None
-              ):
+    if (
+        latitude is None
+        or
+        longitude is None
+    ):
 
-                  invalid += 1
+        invalid += 1
 
-                  if invalid <= 10:
+        if invalid <= 10:
 
-                      print("")
-                      print(
-                          "Invalid VRP row:",
-                          index
-                      )
+            print("")
+            print(
+                "Invalid VRP row:",
+                index
+            )
 
-                      print(
-                          "  latitude raw:",
-                          repr(
-                              lat_value
-                          )
-                      )
+            print(
+                "  latitude raw:",
+                repr(
+                    lat_value
+                )
+            )
 
-                      print(
-                          "  longitude raw:",
-                          repr(
-                              lon_value
-                          )
-                      )
+            print(
+                "  longitude raw:",
+                repr(
+                    lon_value
+                )
+            )
 
-                  continue
+        continue
 
 
-              if not (
-                  -90
-                  <=
-                  latitude
-                  <=
-                  90
-              ):
+    if not (
+        -90
+        <=
+        latitude
+        <=
+        90
+    ):
 
-                  invalid += 1
+        invalid += 1
 
-                  continue
+        continue
 
 
-              if not (
-                  -180
-                  <=
-                  longitude
-                  <=
-                  180
-              ):
+    if not (
+        -180
+        <=
+        longitude
+        <=
+        180
+    ):
 
-                  invalid += 1
+        invalid += 1
 
-                  continue
+        continue
 
 
-              format_counts[
-                  coordinate_format(
-                      lat_value
-                  )
-              ] = (
-                  format_counts.get(
-                      coordinate_format(
-                          lat_value
-                      ),
-                      0
-                  )
-                  +
-                  1
-              )
+    format_counts[
+        coordinate_format(
+            lat_value
+        )
+    ] = (
+        format_counts.get(
+            coordinate_format(
+                lat_value
+            ),
+            0
+        )
+        +
+        1
+    )
 
 
-              # ----------------------------------------------------
-              # Name
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # Name
+    # ----------------------------------------------------
 
-              if name_field:
+    if name_field:
 
-                  name = str(
-                      row.get(
-                          name_field,
-                          ""
-                      )
-                  ).strip()
+        name = str(
+            row.get(
+                name_field,
+                ""
+            )
+        ).strip()
 
-              else:
+    else:
 
-                  name = ""
+        name = ""
 
 
-              if not name:
+    if not name:
 
-                  name = (
-                      f"VRP {index}"
-                  )
+        name = (
+            f"VRP {index}"
+        )
 
 
-              # ----------------------------------------------------
-              # Preserve every NATS column.
-              # ----------------------------------------------------
+    # ----------------------------------------------------
+    # Preserve every NATS column.
+    # ----------------------------------------------------
 
-              properties = {
-                  str(
-                      key
-                  ).strip():
-                      value
-                  for key, value in row.items()
-                  if key
-              }
+    properties = {
+        str(
+            key
+        ).strip():
+            value
+        for key, value in row.items()
+        if key
+    }
 
 
-              properties[
-                  "name"
-              ] = name
+    properties[
+        "name"
+    ] = name
 
 
-              properties[
-                  "ident"
-              ] = name
+    properties[
+        "ident"
+    ] = name
 
 
-              properties[
-                  "source"
-              ] = (
-                  "NATS Visual Reference Points List"
-              )
+    properties[
+        "source"
+    ] = (
+        "NATS Visual Reference Points List"
+    )
 
 
-              features.append(
-                  {
-                      "type":
-                          "Feature",
+    features.append(
+        {
+            "type":
+                "Feature",
 
-                      "id":
-                          name,
+            "id":
+                name,
 
-                      "properties":
-                          properties,
+            "properties":
+                properties,
 
-                      "geometry":
-                          {
-                              "type":
-                                  "Point",
+            "geometry":
+                {
+                    "type":
+                        "Point",
 
-                              "coordinates":
-                                  [
-                                      longitude,
-                                      latitude
-                                  ]
-                          }
-                  }
-              )
+                    "coordinates":
+                        [
+                            longitude,
+                            latitude
+                        ]
+                }
+        }
+    )
 
 
-          # ========================================================
-          # RESULTS
-          # ========================================================
+# ========================================================
+# RESULTS
+# ========================================================
 
-          print("")
-          print(
-              "=========================================="
-          )
+print("")
+print(
+    "=========================================="
+)
 
-          print(
-              "NATS VRP CONVERSION RESULT"
-          )
+print(
+    "NATS VRP CONVERSION RESULT"
+)
 
-          print(
-              "=========================================="
-          )
+print(
+    "=========================================="
+)
 
-          print(
-              "CSV records:",
-              len(
-                  rows
-              )
-          )
+print(
+    "CSV records:",
+    len(
+        rows
+    )
+)
 
-          print(
-              "Valid VRPs:",
-              len(
-                  features
-              )
-          )
+print(
+    "Valid VRPs:",
+    len(
+        features
+    )
+)
 
-          print(
-              "Invalid rows:",
-              invalid
-          )
+print(
+    "Invalid rows:",
+    invalid
+)
 
-          print("")
-          print(
-              "Coordinate formats:"
-          )
+print("")
+print(
+    "Coordinate formats:"
+)
 
-          for key, value in format_counts.items():
+for key, value in format_counts.items():
 
-              print(
-                  f"  {key}: {value}"
-              )
+    print(
+        f"  {key}: {value}"
+    )
 
 
-          # ========================================================
-          # SAMPLE OUTPUT
-          # ========================================================
+# ========================================================
+# SAMPLE OUTPUT
+# ========================================================
 
-          print("")
-          print(
-              "First 5 converted VRPs:"
-          )
+print("")
+print(
+    "First 5 converted VRPs:"
+)
 
 
-          for feature in features[
-              :5
-          ]:
+for feature in features[
+    :5
+]:
 
-              print(
-                  "  ",
-                  feature[
-                      "properties"
-                  ].get(
-                      "name"
-                  ),
-                  feature[
-                      "geometry"
-                  ][
-                      "coordinates"
-                  ]
-              )
+    print(
+        "  ",
+        feature[
+            "properties"
+        ].get(
+            "name"
+        ),
+        feature[
+            "geometry"
+        ][
+            "coordinates"
+        ]
+    )
 
 
-          # ========================================================
-          # SAFETY
-          # ========================================================
+# ========================================================
+# SAFETY
+# ========================================================
 
-          if not features:
+if not features:
 
-              print("")
-              print(
-                  "ERROR: NATS VRP conversion produced ZERO features."
-              )
+    print("")
+    print(
+        "ERROR: NATS VRP conversion produced ZERO features."
+    )
 
-              print("")
-              print(
-                  "Detected fields:"
-              )
+    print("")
+    print(
+        "Detected fields:"
+    )
 
 
-              for field in fields:
+    for field in fields:
 
-                  print(
-                      "  ",
-                      repr(
-                          field
-                      )
-                  )
+        print(
+            "  ",
+            repr(
+                field
+            )
+        )
 
 
-              print("")
-              print(
-                  "First 5 raw rows:"
-              )
+    print("")
+    print(
+        "First 5 raw rows:"
+    )
 
 
-              for row in rows[
-                  :5
-              ]:
+    for row in rows[
+        :5
+    ]:
 
-                  print(
-                      row
-                  )
+        print(
+            row
+        )
 
 
-              raise SystemExit(
-                  "ERROR: Existing repository data will NOT be replaced."
-              )
+    raise SystemExit(
+        "ERROR: Existing repository data will NOT be replaced."
+    )
 
 
-          # ========================================================
-          # WRITE GEOJSON
-          # ========================================================
+# ========================================================
+# WRITE GEOJSON
+# ========================================================
 
-          OUTPUT.parent.mkdir(
-              parents=True,
-              exist_ok=True
-          )
+OUTPUT.parent.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
-          OUTPUT.write_text(
-              json.dumps(
-                  {
-                      "type":
-                          "FeatureCollection",
+OUTPUT.write_text(
+    json.dumps(
+        {
+            "type":
+                "FeatureCollection",
 
-                      "features":
-                          features
-                  },
-                  ensure_ascii=False,
-                  separators=(
-                      ",",
-                      ":"
-                  )
-              ),
-              encoding="utf-8"
-          )
+            "features":
+                features
+        },
+        ensure_ascii=False,
+        separators=(
+            ",",
+            ":"
+        )
+    ),
+    encoding="utf-8"
+)
 
 
-          print("")
-          print(
-              "Output:",
-              OUTPUT
-          )
+print("")
+print(
+    "Output:",
+    OUTPUT
+)
 
-          print(
-              "GeoJSON features:",
-              len(
-                  features
-              )
-          )
+print(
+    "GeoJSON features:",
+    len(
+        features
+    )
+)
 
-          PY
+PY
