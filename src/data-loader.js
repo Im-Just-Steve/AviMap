@@ -35,9 +35,11 @@ export async function loadAviationData(onProgress = () => {}) {
     assertOk(response);
     result.reportingPoints = normaliseGeoJson(await response.json());
     if (!result.reportingPoints.features.length) {
-      throw new Error("Local UK reporting-point file contains zero features");
+      console.warn("AviMap: local UK reporting-point file is empty. Run the GitHub aviation-data workflow to populate it.");
+      onProgress("UK VRP data not populated yet.");
+    } else {
+      onProgress(`Loaded ${result.reportingPoints.features.length.toLocaleString()} UK VRPs`);
     }
-    onProgress(`Loaded ${result.reportingPoints.features.length.toLocaleString()} UK VRPs`);
   } catch (error) {
     console.error("AviMap reporting-point data failed:", error);
     onProgress("UK VRP data unavailable — map remains available.");

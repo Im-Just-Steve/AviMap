@@ -363,3 +363,15 @@ errors.
 Fixed the OpenFreeMap glyph requests caused by the style's
 `Open Sans Regular,Arial Unicode MS Regular` font stack. AviMap now requests
 the Open Sans glyph set without the invalid comma/space font-stack segment.
+
+
+## v1.2.3 UK VRP source
+
+UK VRPs are now sourced from the official NATS AIS Visual Reference Points
+List dataset. NATS states that this is the consolidated UK VRP list and that
+a CSV is provided for automated processes. The GitHub Action discovers the
+current CSV automatically, so the AIRAC date does not need to be hard-coded.
+
+If the committed VRP GeoJSON is still empty, run `Update UK aviation data`
+once. The PWA now handles an empty first-run file without throwing an
+application error.

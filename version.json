@@ -1,6 +1,6 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed MapLibre glyph loading by removing the invalid Open Sans/Arial Unicode MS font-stack from the OpenFreeMap glyph request."
+  "releaseNotes": "Switched UK VRP acquisition to the official NATS AIS Visual Reference Points List dataset. The GitHub Action discovers the current NATS CSV, downloads it, converts it to local GeoJSON, and validates the result. An empty first-run VRP file is handled gracefully by the PWA."
 }
