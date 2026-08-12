@@ -17,13 +17,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Find current NATS datasets
+      - name: Find current NATS dataset date
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Finding current NATS datasets"
+          echo "Finding current NATS dataset date"
           echo "=========================================="
 
           NATS_PAGE="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
@@ -53,7 +53,6 @@ jobs:
               errors="replace"
           )
 
-          # Find all dates displayed by the NATS page.
           dates = []
 
           for match in re.finditer(
@@ -74,7 +73,7 @@ jobs:
 
           if not dates:
               raise SystemExit(
-                  "ERROR: Could not find an effective NATS date."
+                  "ERROR: Could not determine current NATS AIRAC date."
               )
 
           effective = max(dates)
@@ -84,9 +83,9 @@ jobs:
           )
 
           print("")
-          print("NATS effective dataset date:")
+          print("Current NATS effective date:")
           print(f"  {effective}")
-          print(f"  {suffix}")
+          print(f"  Dataset suffix: {suffix}")
           print("")
 
           Path(
@@ -95,399 +94,165 @@ jobs:
               suffix,
               encoding="utf-8"
           )
-
-          # --------------------------------------------------------
-          # We need these exact filenames.
-          # --------------------------------------------------------
-
-          aip_xml = f"EG_AIP_DS_FULL_{suffix}.XML"
-          aip_kml = f"EG_AIP_DS_FULL_{suffix}.KML"
-          vrp_csv = f"EG_VRP_DS_AREA1_FULL_{suffix}.CSV"
-
-          # --------------------------------------------------------
-          # Extract every href from the page.
-          # --------------------------------------------------------
-
-          hrefs = re.findall(
-              r"""href\s*=\s*["']([^"']+)["']""",
-              html,
-              flags=re.I
-          )
-
-          def find_link(filename):
-              filename_lower = filename.lower()
-
-              for href in hrefs:
-                  if filename_lower in href.lower():
-                      return href
-
-              return None
-
-          xml_link = find_link(aip_xml)
-          kml_link = find_link(aip_kml)
-          vrp_link = find_link(vrp_csv)
-
-          print("Dataset links found directly on NATS page:")
-          print("")
-          print(f"  AIP XML: {xml_link}")
-          print(f"  AIP KML: {kml_link}")
-          print(f"  VRP CSV: {vrp_link}")
-          print("")
-
-          # --------------------------------------------------------
-          # The NATS index page may not expose every file directly.
-          # The search therefore also records the filenames so the
-          # next stage can inspect the NATS export locations.
-          # --------------------------------------------------------
-
-          Path(
-              "/tmp/nats-aip-xml-name.txt"
-          ).write_text(
-              aip_xml,
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-aip-kml-name.txt"
-          ).write_text(
-              aip_kml,
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-vrp-name.txt"
-          ).write_text(
-              vrp_csv,
-              encoding="utf-8"
-          )
-
-          if xml_link:
-              Path(
-                  "/tmp/nats-aip-xml-link.txt"
-              ).write_text(
-                  xml_link,
-                  encoding="utf-8"
-              )
-
-          if kml_link:
-              Path(
-                  "/tmp/nats-aip-kml-link.txt"
-              ).write_text(
-                  kml_link,
-                  encoding="utf-8"
-              )
-
-          if vrp_link:
-              Path(
-                  "/tmp/nats-vrp-link.txt"
-              ).write_text(
-                  vrp_link,
-                  encoding="utf-8"
-              )
           PY
 
-      - name: Locate NATS download URLs
+
+      # ============================================================
+      # DOWNLOAD NATS AIP
+      #
+      # NATS export naming convention:
+      #
+      # EG_AIP_DS_FULL_YYYYMMDD_XML.zip
+      #
+      # The archive is extracted and we use whatever XML/KML
+      # geometry files NATS actually supplies.
+      # ============================================================
+
+      - name: Download NATS AIP dataset
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          import re
-          from pathlib import Path
-          from urllib.parse import urljoin
+          DATE=$(cat /tmp/nats-date.txt)
 
-          html = Path(
-              "/tmp/nats-index.html"
-          ).read_text(
-              encoding="utf-8",
-              errors="replace"
-          )
+          mkdir -p \
+            /tmp/nats/aip \
+            /tmp/nats/aip-extract
 
-          suffix = Path(
-              "/tmp/nats-date.txt"
-          ).read_text().strip()
+          AIP_FILE="EG_AIP_DS_FULL_${DATE}_XML.zip"
 
-          filenames = {
-              "aip_xml": f"EG_AIP_DS_FULL_{suffix}.XML",
-              "aip_kml": f"EG_AIP_DS_FULL_{suffix}.KML",
-              "vrp": f"EG_VRP_DS_AREA1_FULL_{suffix}.CSV"
-          }
-
-          # --------------------------------------------------------
-          # Collect all URLs on the page.
-          # --------------------------------------------------------
-
-          hrefs = re.findall(
-              r"""href\s*=\s*["']([^"']+)["']""",
-              html,
-              flags=re.I
-          )
-
-          base = (
-              "https://nats-uk.ead-it.com/"
-          )
-
-          urls = []
-
-          for href in hrefs:
-              urls.append(
-                  urljoin(
-                      base,
-                      href
-                  )
-              )
-
-          # --------------------------------------------------------
-          # Look for exact filenames first.
-          # --------------------------------------------------------
-
-          found = {}
-
-          for key, filename in filenames.items():
-
-              for url in urls:
-
-                  if filename.lower() in url.lower():
-                      found[key] = url
-                      break
-
-          # --------------------------------------------------------
-          # If the index page does not expose the actual files,
-          # inspect the HTML around the filename for links.
-          # --------------------------------------------------------
-
-          for key, filename in filenames.items():
-
-              if key in found:
-                  continue
-
-              pattern = re.escape(
-                  filename
-              )
-
-              matches = list(
-                  re.finditer(
-                      pattern,
-                      html,
-                      flags=re.I
-                  )
-              )
-
-              for match in matches:
-
-                  start = max(
-                      0,
-                      match.start() - 5000
-                  )
-
-                  end = min(
-                      len(html),
-                      match.end() + 5000
-                  )
-
-                  nearby = html[
-                      start:end
-                  ]
-
-                  nearby_hrefs = re.findall(
-                      r"""href\s*=\s*["']([^"']+)["']""",
-                      nearby,
-                      flags=re.I
-                  )
-
-                  for href in nearby_hrefs:
-
-                      url = urljoin(
-                          base,
-                          href
-                      )
-
-                      if (
-                          "/cms-nats/export/" in url
-                          or
-                          filename.lower() in url.lower()
-                      ):
-                          found[key] = url
-                          break
-
-                  if key in found:
-                      break
-
-          print("")
-          print("==========================================")
-          print("NATS DOWNLOAD URL DISCOVERY")
-          print("==========================================")
-          print("")
-
-          for key in (
-              "aip_xml",
-              "aip_kml",
-              "vrp"
-          ):
-
-              print(
-                  f"{key}:"
-              )
-
-              print(
-                  f"  {found.get(key, 'NOT FOUND')}"
-              )
-
-              print("")
-
-          # --------------------------------------------------------
-          # Save anything discovered.
-          # --------------------------------------------------------
-
-          for key, url in found.items():
-
-              Path(
-                  f"/tmp/nats-{key}-url.txt"
-              ).write_text(
-                  url,
-                  encoding="utf-8"
-              )
-
-          # --------------------------------------------------------
-          # Do NOT fail yet if the page does not expose the links.
-          #
-          # The next step will query the NATS export directory
-          # structure.
-          # --------------------------------------------------------
-
-          if not found:
-              print(
-                  "No direct download links were exposed by the index."
-              )
-          PY
-
-      - name: Download NATS AIP data
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p /tmp/nats
-
-          echo "=========================================="
-          echo "Downloading NATS AIP"
-          echo "=========================================="
-
-          if [ -f /tmp/nats-aip_xml-url.txt ]; then
-            XML_URL=$(cat /tmp/nats-aip_xml-url.txt)
-          else
-            XML_URL=""
-          fi
-
-          if [ -f /tmp/nats-aip_kml-url.txt ]; then
-            KML_URL=$(cat /tmp/nats-aip_kml-url.txt)
-          else
-            KML_URL=""
-          fi
-
-          # --------------------------------------------------------
-          # Try the exact links first.
-          # --------------------------------------------------------
-
-          if [ -n "$XML_URL" ]; then
-
-            echo ""
-            echo "AIP XML:"
-            echo "$XML_URL"
-
-            curl \
-              --fail \
-              --silent \
-              --show-error \
-              --location \
-              --retry 5 \
-              --retry-delay 5 \
-              --user-agent "AviMap/1.0" \
-              "$XML_URL" \
-              --output /tmp/nats/aip.xml || true
-
-          fi
-
-          if [ -n "$KML_URL" ]; then
-
-            echo ""
-            echo "AIP KML:"
-            echo "$KML_URL"
-
-            curl \
-              --fail \
-              --silent \
-              --show-error \
-              --location \
-              --retry 5 \
-              --retry-delay 5 \
-              --user-agent "AviMap/1.0" \
-              "$KML_URL" \
-              --output /tmp/nats/aip.kml || true
-
-          fi
-
-          # --------------------------------------------------------
-          # Verify whether we actually obtained the files.
-          # --------------------------------------------------------
-
-          XML_OK=0
-          KML_OK=0
-
-          if [ -s /tmp/nats/aip.xml ]; then
-            XML_OK=1
-          fi
-
-          if [ -s /tmp/nats/aip.kml ]; then
-            KML_OK=1
-          fi
+          AIP_URL="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets/AIP/${AIP_FILE}"
 
           echo ""
-          echo "AIP XML downloaded: $XML_OK"
-          echo "AIP KML downloaded: $KML_OK"
+          echo "=========================================="
+          echo "Downloading NATS AIP dataset"
+          echo "=========================================="
+          echo ""
+          echo "Dataset:"
+          echo "$AIP_FILE"
+          echo ""
+          echo "URL:"
+          echo "$AIP_URL"
           echo ""
 
-          # --------------------------------------------------------
-          # If the NATS index didn't expose the files, stop here
-          # with useful diagnostics rather than guessing URLs.
-          # --------------------------------------------------------
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 5 \
+            --retry-delay 5 \
+            --user-agent "AviMap/1.0" \
+            "$AIP_URL" \
+            --output /tmp/nats/aip.zip
 
-          if [ "$XML_OK" -ne 1 ] || [ "$KML_OK" -ne 1 ]; then
+          test -s /tmp/nats/aip.zip
 
-            echo "ERROR: NATS did not expose usable AIP download URLs."
-            echo ""
-            echo "The effective dataset is:"
-            cat /tmp/nats-date.txt
-            echo ""
-            echo "Expected:"
-            cat /tmp/nats-aip-xml-name.txt
-            cat /tmp/nats-aip-kml-name.txt
-            echo ""
-            echo "This is intentional: the workflow will not invent"
-            echo "an NATS download path and risk downloading the wrong data."
-            exit 1
+          echo ""
+          echo "AIP download successful:"
+          ls -lh /tmp/nats/aip.zip
+          echo ""
 
+          echo "Testing archive..."
+
+          unzip \
+            -t \
+            /tmp/nats/aip.zip
+
+          echo ""
+          echo "Extracting AIP..."
+
+          unzip \
+            -o \
+            /tmp/nats/aip.zip \
+            -d /tmp/nats/aip-extract
+
+          echo ""
+          echo "AIP archive contents:"
+          find \
+            /tmp/nats/aip-extract \
+            -type f \
+            -print
+
+          echo ""
+
+          AIP_XML=$(
+            find \
+              /tmp/nats/aip-extract \
+              -type f \
+              \( \
+                -iname "*.xml" \
+                -o \
+                -iname "*.XML" \
+              \) \
+              | head -n 1 || true
+          )
+
+          AIP_KML=$(
+            find \
+              /tmp/nats/aip-extract \
+              -type f \
+              \( \
+                -iname "*.kml" \
+                -o \
+                -iname "*.KML" \
+              \) \
+              | head -n 1 || true
+          )
+
+          if [ -n "$AIP_XML" ]; then
+            echo "$AIP_XML" \
+              > /tmp/nats-aip-xml.txt
           fi
 
-          echo "AIP download successful."
+          if [ -n "$AIP_KML" ]; then
+            echo "$AIP_KML" \
+              > /tmp/nats-aip-kml.txt
+          fi
 
-      - name: Download NATS VRP data
-        shell: bash
-        run: |
-          set -euo pipefail
+          echo "Detected XML:"
+          echo "${AIP_XML:-NONE}"
 
-          mkdir -p /tmp/nats
+          echo ""
+          echo "Detected KML:"
+          echo "${AIP_KML:-NONE}"
 
-          if [ -f /tmp/nats-vrp-url.txt ]; then
-            VRP_URL=$(cat /tmp/nats-vrp-url.txt)
-          else
-            echo "ERROR: NATS VRP download URL was not discovered."
+          echo ""
+
+          if [ -z "$AIP_XML" ] && [ -z "$AIP_KML" ]; then
+            echo "ERROR: No XML or KML found inside NATS AIP archive."
             exit 1
           fi
 
+
+      # ============================================================
+      # DOWNLOAD NATS VRP
+      # ============================================================
+
+      - name: Download NATS VRP dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DATE=$(cat /tmp/nats-date.txt)
+
+          mkdir -p \
+            /tmp/nats/vrp \
+            /tmp/nats/vrp-extract
+
+          VRP_FILE="EG_VRP_DS_AREA1_FULL_${DATE}_CSV.zip"
+
+          VRP_URL="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets/VRP/${VRP_FILE}"
+
+          echo ""
           echo "=========================================="
-          echo "Downloading NATS VRP"
+          echo "Downloading NATS VRP dataset"
           echo "=========================================="
           echo ""
+          echo "Dataset:"
+          echo "$VRP_FILE"
+          echo ""
+          echo "URL:"
           echo "$VRP_URL"
           echo ""
 
@@ -500,52 +265,56 @@ jobs:
             --retry-delay 5 \
             --user-agent "AviMap/1.0" \
             "$VRP_URL" \
-            --output /tmp/nats/vrp-download
+            --output /tmp/nats/vrp.zip
 
-          test -s /tmp/nats/vrp-download
-
-          mkdir -p /tmp/nats/vrp-extract
-
-          if unzip -t \
-            /tmp/nats/vrp-download \
-            >/dev/null 2>&1
-          then
-
-            unzip \
-              -o \
-              /tmp/nats/vrp-download \
-              -d /tmp/nats/vrp-extract
-
-            VRP_CSV=$(
-              find \
-                /tmp/nats/vrp-extract \
-                -type f \
-                -iname "*.csv" \
-                | head -n 1 || true
-            )
-
-            if [ -z "$VRP_CSV" ]; then
-              echo "ERROR: No CSV found in VRP archive."
-              exit 1
-            fi
-
-            cp \
-              "$VRP_CSV" \
-              /tmp/nats/vrps.csv
-
-          else
-
-            cp \
-              /tmp/nats/vrp-download \
-              /tmp/nats/vrps.csv
-
-          fi
-
-          test -s /tmp/nats/vrps.csv
+          test -s /tmp/nats/vrp.zip
 
           echo ""
-          echo "VRP download successful."
+          echo "VRP download successful:"
+          ls -lh /tmp/nats/vrp.zip
+
+          echo ""
+          echo "Extracting VRP archive..."
+
+          unzip \
+            -o \
+            /tmp/nats/vrp.zip \
+            -d /tmp/nats/vrp-extract
+
+          VRP_CSV=$(
+            find \
+              /tmp/nats/vrp-extract \
+              -type f \
+              -iname "*.csv" \
+              | head -n 1 || true
+          )
+
+          if [ -z "$VRP_CSV" ]; then
+            echo "ERROR: No CSV found in NATS VRP archive."
+            exit 1
+          fi
+
+          cp \
+            "$VRP_CSV" \
+            /tmp/nats/vrps.csv
+
+          echo ""
+          echo "VRP CSV:"
+          echo "$VRP_CSV"
+
+          echo ""
           wc -l /tmp/nats/vrps.csv
+
+
+      # ============================================================
+      # CONVERT AIRSPACE
+      #
+      # Prefer KML if NATS supplies it because it directly contains
+      # display geometry.
+      #
+      # If only XML is supplied, stop with diagnostics rather than
+      # silently producing incorrect airspace.
+      # ============================================================
 
       - name: Convert NATS airspace to GeoJSON
         shell: bash
@@ -554,226 +323,267 @@ jobs:
 
           mkdir -p /tmp/avimap-data
 
-          python3 <<'PY'
-          import json
-          import re
-          import xml.etree.ElementTree as ET
-          from pathlib import Path
+          if [ -f /tmp/nats-aip-kml.txt ]; then
 
-          tree = ET.parse(
-              "/tmp/nats/aip.kml"
-          )
+            AIP_KML=$(cat /tmp/nats-aip-kml.txt)
 
-          root = tree.getroot()
+            echo ""
+            echo "Using NATS KML geometry:"
+            echo "$AIP_KML"
+            echo ""
 
-          def local(tag):
-              return tag.split(
-                  "}",
-                  1
-              )[-1].lower()
+            python3 <<'PY'
+            import json
+            import re
+            import xml.etree.ElementTree as ET
+            from pathlib import Path
 
-          def text(element):
-              return " ".join(
-                  x.strip()
-                  for x in element.itertext()
-                  if x.strip()
-              )
+            kml_path = Path(
+                "/tmp/nats-aip-kml.txt"
+            ).read_text().strip()
 
-          def parse_coords(value):
-              result = []
+            tree = ET.parse(
+                kml_path
+            )
 
-              for token in re.split(
-                  r"\s+",
-                  value.strip()
-              ):
+            root = tree.getroot()
 
-                  parts = token.split(",")
+            def local(tag):
+                return tag.split(
+                    "}",
+                    1
+                )[-1].lower()
 
-                  if len(parts) < 2:
-                      continue
+            def text(element):
+                return " ".join(
+                    x.strip()
+                    for x in element.itertext()
+                    if x.strip()
+                )
 
-                  try:
-                      lon = float(parts[0])
-                      lat = float(parts[1])
-                  except ValueError:
-                      continue
+            def parse_coords(value):
+                result = []
 
-                  if (
-                      -180 <= lon <= 180
-                      and
-                      -90 <= lat <= 90
-                  ):
-                      result.append([
-                          lon,
-                          lat
-                      ])
+                for token in re.split(
+                    r"\s+",
+                    value.strip()
+                ):
 
-              return result
+                    parts = token.split(",")
 
-          def classify(value):
-              value = value.upper()
+                    if len(parts) < 2:
+                        continue
 
-              if re.search(
-                  r"\b(PROHIBITED|RESTRICTED|DANGER)\b",
-                  value
-              ):
-                  return "PRD"
+                    try:
+                        lon = float(parts[0])
+                        lat = float(parts[1])
+                    except ValueError:
+                        continue
 
-              if re.search(
-                  r"\bATZ\b",
-                  value
-              ):
-                  return "ATZ"
+                    if (
+                        -180 <= lon <= 180
+                        and
+                        -90 <= lat <= 90
+                    ):
+                        result.append([
+                            lon,
+                            lat
+                        ])
 
-              if re.search(
-                  r"\bTMZ\b",
-                  value
-              ):
-                  return "TMZ"
+                return result
 
-              if re.search(
-                  r"\bMATZ\b",
-                  value
-              ):
-                  return "MATZ"
+            def classify(value):
+                value = value.upper()
 
-              if re.search(
-                  r"\bRMZ\b",
-                  value
-              ):
-                  return "RMZ"
+                if re.search(
+                    r"\b(PROHIBITED|RESTRICTED|DANGER)\b",
+                    value
+                ):
+                    return "PRD"
 
-              if re.search(
-                  r"\bCLASS\s*A\b",
-                  value
-              ):
-                  return "CLASS_A"
+                if re.search(
+                    r"\bATZ\b",
+                    value
+                ):
+                    return "ATZ"
 
-              if re.search(
-                  r"\bCLASS\s*[BCD]\b",
-                  value
-              ):
-                  return "CONTROLLED"
+                if re.search(
+                    r"\bTMZ\b",
+                    value
+                ):
+                    return "TMZ"
 
-              if re.search(
-                  r"\b(CTA|CTR|TMA|CTZ|CONTROLLED)\b",
-                  value
-              ):
-                  return "CONTROLLED"
+                if re.search(
+                    r"\bMATZ\b",
+                    value
+                ):
+                    return "MATZ"
 
-              return "OTHER"
+                if re.search(
+                    r"\bRMZ\b",
+                    value
+                ):
+                    return "RMZ"
 
-          features = []
+                if re.search(
+                    r"\bCLASS\s*A\b",
+                    value
+                ):
+                    return "CLASS_A"
 
-          for placemark in root.iter():
+                if re.search(
+                    r"\bCLASS\s*[BCD]\b",
+                    value
+                ):
+                    return "CONTROLLED"
 
-              if local(
-                  placemark.tag
-              ) != "placemark":
-                  continue
+                if re.search(
+                    r"\b(CTA|CTR|TMA|CTZ|CONTROLLED)\b",
+                    value
+                ):
+                    return "CONTROLLED"
 
-              name = ""
-              description = ""
+                return "OTHER"
 
-              for element in placemark.iter():
+            features = []
 
-                  tag = local(
-                      element.tag
-                  )
+            for placemark in root.iter():
 
-                  if (
-                      tag == "name"
-                      and
-                      not name
-                  ):
-                      name = text(
-                          element
-                      )
+                if local(
+                    placemark.tag
+                ) != "placemark":
+                    continue
 
-                  if (
-                      tag == "description"
-                      and
-                      not description
-                  ):
-                      description = text(
-                          element
-                      )
+                name = ""
+                description = ""
 
-              searchable = text(
-                  placemark
-              )
+                for element in placemark.iter():
 
-              category = classify(
-                  searchable
-              )
+                    tag = local(
+                        element.tag
+                    )
 
-              rings = []
+                    if (
+                        tag == "name"
+                        and
+                        not name
+                    ):
+                        name = text(
+                            element
+                        )
 
-              for element in placemark.iter():
+                    if (
+                        tag == "description"
+                        and
+                        not description
+                    ):
+                        description = text(
+                            element
+                        )
 
-                  if local(
-                      element.tag
-                  ) != "coordinates":
-                      continue
+                searchable = text(
+                    placemark
+                )
 
-                  coords = parse_coords(
-                      text(element)
-                  )
+                category = classify(
+                    searchable
+                )
 
-                  if len(coords) >= 3:
+                rings = []
 
-                      if coords[0] != coords[-1]:
-                          coords.append(
-                              coords[0]
-                          )
+                for element in placemark.iter():
 
-                      rings.append(
-                          coords
-                      )
+                    if local(
+                        element.tag
+                    ) != "coordinates":
+                        continue
 
-              if not rings:
-                  continue
+                    coords = parse_coords(
+                        text(element)
+                    )
 
-              features.append({
-                  "type": "Feature",
-                  "properties": {
-                      "name": (
-                          name
-                          or
-                          "NATS airspace"
-                      ),
-                      "description": description,
-                      "category": category,
-                      "source": "NATS UK ICAO AIP Dataset"
-                  },
-                  "geometry": {
-                      "type": "Polygon",
-                      "coordinates": rings
-                  }
-              })
+                    if len(coords) >= 3:
 
-          if not features:
-              raise SystemExit(
-                  "ERROR: NATS AIP produced zero airspace polygons."
-              )
+                        if coords[0] != coords[-1]:
+                            coords.append(
+                                coords[0]
+                            )
 
-          Path(
-              "/tmp/avimap-data/uk-airspace.geojson"
-          ).write_text(
-              json.dumps(
-                  {
-                      "type": "FeatureCollection",
-                      "features": features
-                  },
-                  separators=(",", ":")
-              ),
-              encoding="utf-8"
-          )
+                        rings.append(
+                            coords
+                        )
 
-          print(
-              f"Airspace polygons: {len(features)}"
-          )
-          PY
+                if not rings:
+                    continue
+
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "name": (
+                            name
+                            or
+                            "NATS airspace"
+                        ),
+                        "description": description,
+                        "category": category,
+                        "source": "NATS UK ICAO AIP Dataset"
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": rings
+                    }
+                })
+
+            print("")
+            print(
+                f"Airspace polygons: {len(features)}"
+            )
+            print("")
+
+            if not features:
+                raise SystemExit(
+                    "ERROR: NATS KML contained zero airspace polygons."
+                )
+
+            Path(
+                "/tmp/avimap-data/uk-airspace.geojson"
+            ).write_text(
+                json.dumps(
+                    {
+                        "type": "FeatureCollection",
+                        "features": features
+                    },
+                    separators=(",", ":")
+                ),
+                encoding="utf-8"
+            )
+            PY
+
+          else
+
+            echo ""
+            echo "=========================================="
+            echo "NATS AIP FORMAT"
+            echo "=========================================="
+            echo ""
+            echo "NATS supplied XML but no KML geometry."
+            echo ""
+            echo "The XML will NOT be guessed or converted blindly."
+            echo ""
+            echo "XML file:"
+            cat /tmp/nats-aip-xml.txt
+            echo ""
+            echo ""
+            echo "The workflow is stopping safely."
+            echo "No existing airspace data will be replaced."
+            exit 1
+
+          fi
+
+
+      # ============================================================
+      # CONVERT VRPS
+      # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
         shell: bash
@@ -834,7 +644,9 @@ jobs:
 
               for name in names:
 
-                  key = norm(name)
+                  key = norm(
+                      name
+                  )
 
                   if key in lookup:
                       return lookup[key]
@@ -843,7 +655,9 @@ jobs:
 
                   for name in names:
 
-                      wanted = norm(name)
+                      wanted = norm(
+                          name
+                      )
 
                       if (
                           wanted in key
@@ -878,6 +692,27 @@ jobs:
               "Longitude DD",
               "Longitude Decimal"
           )
+
+          print("")
+          print("CSV fields:")
+
+          for field in fields:
+              print(
+                  f"  {field}"
+              )
+
+          print("")
+          print("Detected:")
+          print(
+              f"  Name      : {name_field}"
+          )
+          print(
+              f"  Latitude  : {lat_field}"
+          )
+          print(
+              f"  Longitude : {lon_field}"
+          )
+          print("")
 
           if not lat_field or not lon_field:
               raise SystemExit(
@@ -1063,12 +898,16 @@ jobs:
           ):
 
               lat = parse_coord(
-                  row.get(lat_field),
+                  row.get(
+                      lat_field
+                  ),
                   True
               )
 
               lon = parse_coord(
-                  row.get(lon_field),
+                  row.get(
+                      lon_field
+                  ),
                   False
               )
 
@@ -1093,9 +932,9 @@ jobs:
                   name = f"VRP {index}"
 
               properties = {
-                  str(k): v
-                  for k, v in row.items()
-                  if k
+                  str(key): value
+                  for key, value in row.items()
+                  if key
               }
 
               properties["name"] = name
@@ -1114,13 +953,18 @@ jobs:
                   }
               })
 
+          print("")
+          print("==========================================")
+          print("NATS VRP RESULT")
+          print("==========================================")
+          print("")
           print(
               f"CSV records: {len(rows)}"
           )
-
           print(
-              f"Valid VRPs: {len(features)}"
+              f"Valid VRPs:  {len(features)}"
           )
+          print("")
 
           if not features:
               raise SystemExit(
@@ -1140,6 +984,11 @@ jobs:
               encoding="utf-8"
           )
           PY
+
+
+      # ============================================================
+      # FINAL VALIDATION
+      # ============================================================
 
       - name: Validate generated data
         shell: bash
@@ -1161,8 +1010,8 @@ jobs:
           echo "FINAL VALIDATION"
           echo "=========================================="
           echo ""
-          echo "Airspaces: $AIRSPACE_COUNT"
-          echo "VRPs:      $VRP_COUNT"
+          echo "Airspaces : $AIRSPACE_COUNT"
+          echo "VRPs      : $VRP_COUNT"
           echo ""
 
           if [ "$AIRSPACE_COUNT" -eq 0 ]; then
@@ -1177,7 +1026,12 @@ jobs:
 
           echo "Validation successful."
 
-      - name: Install validated data
+
+      # ============================================================
+      # INSTALL VALIDATED DATA
+      # ============================================================
+
+      - name: Install validated aviation data
         shell: bash
         run: |
           set -euo pipefail
@@ -1206,6 +1060,11 @@ jobs:
           Data is validated before being committed.
           EOF
 
+
+      # ============================================================
+      # COMMIT
+      # ============================================================
+
       - name: Commit updated aviation data
         shell: bash
         run: |
@@ -1225,12 +1084,16 @@ jobs:
             data/SOURCES.md
 
           if git diff --cached --quiet; then
+
             echo "No changes detected."
+
           else
+
             git diff --cached --stat
 
             git commit \
               -m "Update UK aviation data from NATS"
 
             git push
+
           fi
