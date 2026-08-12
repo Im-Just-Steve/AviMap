@@ -1,4 +1,4 @@
-name: Find NATS AIP download path
+name: Inspect NATS dataset download mechanism
 
 on:
   workflow_dispatch:
@@ -7,208 +7,152 @@ permissions:
   contents: read
 
 jobs:
-  discover:
+  inspect:
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Discover NATS AIP download paths
+      - name: Inspect NATS dataset page
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
 
-          DATE="20260806"
-
-          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
+          URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
 
           echo "=========================================="
-          echo "NATS AIP DOWNLOAD DISCOVERY"
+          echo "NATS DATASET PAGE INSPECTION"
           echo "=========================================="
           echo ""
-          echo "AIRAC: $DATE"
-          echo ""
-
-          echo "Known filenames:"
-          echo "  EG_AIP_DS_FULL_${DATE}.XML"
-          echo "  EG_AIP_DS_FULL_${DATE}.KML"
-          echo "  EG_AIP_DS_DIFF_DELTA_${DATE}.XML"
-          echo ""
-
-          echo "=========================================="
-          echo "TESTING POSSIBLE FILE LOCATIONS"
-          echo "=========================================="
-
-          PATHS=(
-            ""
-            "AIP"
-            "AIP/"
-            "AIP%20Dataset"
-            "AIP%20Data"
-            "AIP_Data"
-            "AIP_Dataset"
-            "AIXM"
-            "AIXM51"
-            "ICAO"
-            "UK-ICAO-AIP"
-            "UK_ICAO_AIP"
-            "AIPDS"
-            "AIP_DS"
-            "AIP-Dataset"
-            "AIP_Data_Set"
-            "UK_AIP"
-            "AIP%20DS"
-          )
-
-          FILES=(
-            "EG_AIP_DS_FULL_${DATE}.XML"
-            "EG_AIP_DS_FULL_${DATE}.KML"
-            "EG_AIP_DS_DIFF_DELTA_${DATE}.XML"
-            "EG_AIP_DS_FULL_${DATE}_XML.zip"
-            "EG_AIP_DS_FULL_${DATE}_KML.zip"
-            "EG_AIP_DS_DIFF_DELTA_${DATE}_XML.zip"
-            "EG_AIP_DS_FULL_${DATE}.XML.zip"
-            "EG_AIP_DS_FULL_${DATE}.KML.zip"
-          )
-
-          FOUND=0
-
-          for DIR in "${PATHS[@]}"; do
-
-            for FILE in "${FILES[@]}"; do
-
-              if [ -n "$DIR" ]; then
-                URL="$BASE/$DIR/$FILE"
-              else
-                URL="$BASE/$FILE"
-              fi
-
-              STATUS=$(
-                curl \
-                  --silent \
-                  --output /dev/null \
-                  --write-out "%{http_code}" \
-                  --location \
-                  --max-time 20 \
-                  --user-agent "AviMap/1.0" \
-                  "$URL"
-              )
-
-              if [ "$STATUS" != "404" ]; then
-
-                echo ""
-                echo "***** POSSIBLE MATCH *****"
-                echo "HTTP: $STATUS"
-                echo "URL:  $URL"
-                echo ""
-
-                FOUND=1
-
-              fi
-
-            done
-
-          done
-
-          echo ""
-          echo "=========================================="
-          echo "TESTING NATS EXPORT ROOT"
-          echo "=========================================="
-          echo ""
-
-          ROOT_STATUS=$(
-            curl \
-              --silent \
-              --output /tmp/nats-root.html \
-              --write-out "%{http_code}" \
-              --location \
-              --max-time 30 \
-              --user-agent "AviMap/1.0" \
-              "$BASE/"
-          )
-
-          echo "HTTP: $ROOT_STATUS"
-          echo ""
-
-          if [ -s /tmp/nats-root.html ]; then
-
-            echo "Root response size:"
-            wc -c /tmp/nats-root.html
-
-            echo ""
-            echo "References containing AIP:"
-            grep \
-              -oiE \
-              '.{0,200}AIP.{0,400}' \
-              /tmp/nats-root.html \
-              | head -100 \
-              || true
-
-            echo ""
-            echo "References containing EG_AIP:"
-            grep \
-              -oiE \
-              '.{0,200}EG_AIP.{0,400}' \
-              /tmp/nats-root.html \
-              | head -100 \
-              || true
-
-            echo ""
-            echo "References containing KML:"
-            grep \
-              -oiE \
-              '.{0,200}KML.{0,400}' \
-              /tmp/nats-root.html \
-              | head -100 \
-              || true
-
-          fi
-
-          echo ""
-          echo "=========================================="
-          echo "TESTING NATS DIGITAL-DATASETS DIRECTORY"
-          echo "=========================================="
+          echo "URL:"
+          echo "$URL"
           echo ""
 
           curl \
+            --fail \
             --silent \
             --show-error \
             --location \
-            --max-time 30 \
-            --user-agent "AviMap/1.0" \
-            "$BASE/" \
-            --output /tmp/nats-directory.html \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139 Safari/537.36" \
+            "$URL" \
+            --output /tmp/nats.html
+
+          echo "Downloaded page:"
+          wc -c /tmp/nats.html
+
+          echo ""
+          echo "=========================================="
+          echo "AIP REFERENCES"
+          echo "=========================================="
+
+          grep \
+            -in \
+            -E \
+            'UK ICAO AIP|EG_AIP|AIP XML|AIP KML|download' \
+            /tmp/nats.html \
+            | head -200 \
             || true
 
-          if [ -s /tmp/nats-directory.html ]; then
+          echo ""
+          echo "=========================================="
+          echo "FORM ELEMENTS"
+          echo "=========================================="
 
-            echo "Directory response:"
-            wc -c /tmp/nats-directory.html
-
-            echo ""
-            echo "All references:"
-            grep \
-              -oiE \
-              'href[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
-              /tmp/nats-directory.html \
-              | head -200 \
-              || true
-
-          fi
+          grep \
+            -in \
+            -E \
+            '<form|</form>|action=|method=' \
+            /tmp/nats.html \
+            | head -200 \
+            || true
 
           echo ""
           echo "=========================================="
-          echo "RESULT"
+          echo "SCRIPT REFERENCES"
           echo "=========================================="
-          echo ""
 
-          if [ "$FOUND" -eq 0 ]; then
-            echo "No candidate returned a non-404 response."
-            echo ""
-            echo "This confirms the AIP dataset is not exposed"
-            echo "through the conventional static paths tested."
-          else
-            echo "At least one candidate returned a non-404 response."
-          fi
+          grep \
+            -oiE \
+            '<script[^>]+src=["'\''][^"'\'']+["'\'']' \
+            /tmp/nats.html \
+            | head -200 \
+            || true
 
           echo ""
-          echo "Discovery complete."
+          echo "=========================================="
+          echo "DATA / DOWNLOAD ATTRIBUTES"
+          echo "=========================================="
+
+          grep \
+            -oiE \
+            '.{0,150}(download|dataset|aip|kml|xml|api).{0,300}' \
+            /tmp/nats.html \
+            | head -300 \
+            || true
+
+          echo ""
+          echo "=========================================="
+          echo "FULL AIP HTML CONTEXT"
+          echo "=========================================="
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path(
+              "/tmp/nats.html"
+          ).read_text(
+              encoding="utf-8",
+              errors="replace"
+          )
+
+          patterns = [
+              "UK ICAO AIP",
+              "EG_AIP",
+              "AIP XML",
+              "AIP KML",
+              "ICAO AIP"
+          ]
+
+          for pattern in patterns:
+
+              print("")
+              print("=" * 70)
+              print(f"CONTEXT FOR: {pattern}")
+              print("=" * 70)
+
+              found = False
+
+              for match in re.finditer(
+                  pattern,
+                  html,
+                  flags=re.I
+              ):
+
+                  found = True
+
+                  start = max(
+                      0,
+                      match.start() - 1500
+                  )
+
+                  end = min(
+                      len(html),
+                      match.end() + 3000
+                  )
+
+                  print(
+                      html[start:end]
+                  )
+
+                  print("")
+                  print("-" * 70)
+
+              if not found:
+                  print("NOT FOUND")
+
+          PY
+
+          echo ""
+          echo "=========================================="
+          echo "END INSPECTION"
+          echo "=========================================="
