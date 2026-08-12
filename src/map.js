@@ -164,20 +164,29 @@ function addAirspace() {
     data: sourceData
   });
 
+  const colorExpression = [
+    "match", ["get", "avimapColor"],
+    "purple", "#8b2c83",
+    "magenta", "#b0188a",
+    "blue", "#1769aa",
+    "grey", "#66706f",
+    "#66706f"
+  ];
+
   map.addLayer({
     id: "avimap-airspace-fill",
     type: "fill",
     source: "avimap-airspace-source",
     paint: {
-      "fill-color": [
+      "fill-color": colorExpression,
+      "fill-opacity": [
         "match", ["get", "avimapColor"],
-        "red", "#c62828",
-        "blue", "#245ca8",
-        "magenta", "#a52a83",
-        "teal", "#167c80",
-        "#5f6b70"
-      ],
-      "fill-opacity": 0.11
+        "purple", 0.08,
+        "magenta", 0.10,
+        "blue", 0.07,
+        "grey", 0.035,
+        0.04
+      ]
     }
   });
 
@@ -186,23 +195,24 @@ function addAirspace() {
     type: "line",
     source: "avimap-airspace-source",
     paint: {
-      "line-color": [
-        "match", ["get", "avimapColor"],
-        "red", "#c62828",
-        "blue", "#245ca8",
-        "magenta", "#a52a83",
-        "teal", "#167c80",
-        "#5f6b70"
-      ],
+      "line-color": colorExpression,
       "line-width": [
         "match", ["get", "avimapColor"],
-        "red", 1.8,
-        "blue", 1.6,
-        "magenta", 1.6,
-        "teal", 1.5,
-        1.4
+        "purple", 2.1,
+        "magenta", 1.9,
+        "blue", 1.7,
+        "grey", 1.1,
+        1.2
       ],
-      "line-opacity": 0.95
+      "line-opacity": 0.95,
+      "line-dasharray": [
+        "match", ["get", "airspaceType"],
+        "ATZ", ["literal", [2, 2]],
+        "MATZ", ["literal", [2, 2]],
+        "RMZ", ["literal", [3, 2]],
+        "TMZ", ["literal", [3, 2]],
+        ["literal", [1, 0]]
+      ]
     }
   });
 
@@ -217,14 +227,7 @@ function addAirspace() {
       "text-max-width": 10
     },
     paint: {
-      "text-color": [
-        "match", ["get", "avimapColor"],
-        "red", "#8d1d1d",
-        "blue", "#17457e",
-        "magenta", "#76205f",
-        "teal", "#0d5b5e",
-        "#4b5e5a"
-      ],
+      "text-color": colorExpression,
       "text-halo-color": "#fff",
       "text-halo-width": 1
     }
@@ -232,51 +235,60 @@ function addAirspace() {
 }
 
 function classifyAirspaceColor(properties = {}) {
-  const rawType = [
-    properties.icaoClass,
-    properties.class,
-    properties.type,
-    properties.category,
-    properties.CATEGORY,
-    properties.designator,
-    properties.name
-  ]
-    .filter(v => v !== undefined && v !== null)
-    .map(v => String(v).trim().toUpperCase())
-    .join(" ");
+  const type = Number(properties.type);
+  const icaoClass = Number(
+    properties.icaoClass ??
+    properties.icaoclass ??
+    properties.class
+  );
 
-  // ICAO chart convention: Class A is red.
-  if (/\bCLASS[\s_-]*A\b|\bAIRSPACE[\s_-]*A\b/.test(rawType)) {
-    return "red";
+  // OpenAIP airspace type enum:
+  // 1 Restricted, 2 Danger, 3 Prohibited,
+  // 4 CTR, 5 TMZ, 6 RMZ, 7 TMA,
+  // 13 ATZ, 14 MATZ, 15 Airway, 26 CTA.
+  //
+  // OpenAIP ICAO class enum:
+  // 0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 8 SUA/unclassified.
+  //
+  // UK VFR-inspired presentation:
+  // - Class A / A-type controlled airspace: magenta
+  // - C/D/E controlled airspace: blue
+  // - ATZ/MATZ: blue
+  // - P/R/D: purple
+  // - TMZ/RMZ: blue
+  // - unclassified/other: muted grey
+
+  if (type === 1 || type === 2 || type === 3) {
+    return "purple";
   }
 
-  // ICAO chart convention: Classes B, C, D, E, F and G are blue.
-  if (/\bCLASS[\s_-]*[BCDEFG]\b|\bAIRSPACE[\s_-]*[BCDEFG]\b/.test(rawType)) {
+  if (type === 13 || type === 14) {
     return "blue";
   }
 
-  // UK/ICAO navigation-warning areas: prohibited, restricted and danger.
-  if (/\bPROHIBITED\b|\bRESTRICTED\b|\bDANGER\b|\b(^|[\s_-])[PRD][\s_-]*AREA\b/.test(rawType)) {
-    return "red";
-  }
-
-  // Common controlled-airspace names used in UK datasets.
-  if (
-    /\bCTR\b|\bCTA\b|\bTMA\b|\bCTZ\b|\bATZ\b|\bCONTROL ZONE\b|\bCONTROL AREA\b/.test(rawType)
-  ) {
+  if (type === 5 || type === 6) {
     return "blue";
   }
 
-  // These are not ICAO classes; retain distinct chart-friendly colours.
-  if (/\bTMZ\b|\bTRANSPONDER MANDATORY\b/.test(rawType)) {
+  if (icaoClass === 0) {
     return "magenta";
   }
 
-  if (/\bRMZ\b|\bRADIO MANDATORY\b/.test(rawType)) {
-    return "teal";
+  if ([2, 3, 4].includes(icaoClass)) {
+    return "blue";
   }
 
-  return "other";
+  // Airway and TMA/CTA geometry can be classed separately by OpenAIP.
+  if ([7, 15, 26].includes(type)) {
+    return icaoClass === 0 ? "magenta" : "blue";
+  }
+
+  // UK Class G is uncontrolled and is best kept unobtrusive.
+  if (icaoClass === 6) {
+    return "grey";
+  }
+
+  return "grey";
 }
 
 function normaliseGeoJson(input) {
@@ -287,24 +299,65 @@ function normaliseGeoJson(input) {
       type: "FeatureCollection",
       features: (input.features || []).filter(Boolean).map((f, i) => {
         const properties = {
-          ...(f.properties || {}),
-          name: f.properties?.name ||
-            f.properties?.AN ||
-            f.properties?.designator ||
-            `AREA ${i + 1}`,
-          type: f.properties?.type ||
-            f.properties?.category ||
-            f.properties?.CATEGORY ||
-            f.properties?.class ||
-            f.properties?.AC ||
-            ""
+          ...(f.properties || {})
         };
+
+        const type = Number(properties.type);
+        const icaoClass = Number(
+          properties.icaoClass ??
+          properties.icaoclass ??
+          properties.class
+        );
+
+        const typeNames = {
+          1: "Restricted",
+          2: "Danger",
+          3: "Prohibited",
+          4: "CTR",
+          5: "TMZ",
+          6: "RMZ",
+          7: "TMA",
+          8: "TRA",
+          9: "TSA",
+          10: "FIR",
+          11: "UIR",
+          12: "ADIZ",
+          13: "ATZ",
+          14: "MATZ",
+          15: "Airway",
+          26: "CTA"
+        };
+
+        const classNames = {
+          0: "A",
+          1: "B",
+          2: "C",
+          3: "D",
+          4: "E",
+          5: "F",
+          6: "G",
+          8: "SUA"
+        };
+
+        const airspaceType = typeNames[type] || "";
+        const name =
+          properties.name ||
+          properties.designator ||
+          properties.identifier ||
+          `AREA ${i + 1}`;
 
         return {
           ...f,
           properties: {
             ...properties,
-            avimapColor: classifyAirspaceColor(properties)
+            name,
+            airspaceType,
+            icaoClassName: classNames[icaoClass] || "",
+            avimapColor: classifyAirspaceColor({
+              ...properties,
+              type,
+              icaoClass
+            })
           }
         };
       })
@@ -312,20 +365,10 @@ function normaliseGeoJson(input) {
   }
 
   if (input.type === "Feature") {
-    const properties = {
-      ...(input.properties || {})
-    };
-
-    return {
+    return normaliseGeoJson({
       type: "FeatureCollection",
-      features: [{
-        ...input,
-        properties: {
-          ...properties,
-          avimapColor: classifyAirspaceColor(properties)
-        }
-      }]
-    };
+      features: [input]
+    });
   }
 
   return { type: "FeatureCollection", features: [] };

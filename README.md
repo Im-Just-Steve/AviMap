@@ -210,3 +210,38 @@ with B-G shown blue and Class A red. citeturn2search24turn0search23
 
 TMZ and RMZ are not ICAO airspace classes, so AviMap keeps them visually
 distinct rather than pretending they are part of the A-G class palette.
+
+
+## v1.0.9 UK VFR airspace styling
+
+The previous colour classifier expected textual values such as `Class A`.
+OpenAIP actually stores `icaoClass` and `type` as numeric enums. v1.0.9 uses
+the documented OpenAIP mappings directly.
+
+OpenAIP type mappings include Restricted=1, Danger=2, Prohibited=3, CTR=4,
+TMZ=5, RMZ=6, TMA=7, ATZ=13, MATZ=14 and CTA=26. ICAO class mappings include
+A=0, B=1, C=2, D=3, E=4, F=5, G=6 and SUA/unclassified=8. citeturn2search1
+
+The visual treatment is now inspired by current UK VFR chart conventions:
+Class A/TMA Class A uses magenta, controlled airspace and ATZ/MATZ use blue,
+and prohibited/restricted/danger areas use purple. The CAA confirms that
+UK VFR charts use blue for CTA boundaries and magenta for Class A TMA
+boundaries, while P/R/D areas use bold purple cross-hatched boundaries.
+citeturn0search2turn3search0turn3search1
+
+ATZs are shown with a blue dashed boundary, consistent with UK VFR
+depictions. citeturn4search2
+
+
+## v1.0.10 colour correction
+
+Updated to the requested UK VFR colour reference:
+
+- Class A: magenta
+- ATZ: magenta
+- TMZ: magenta
+- Controlled airspace: blue
+- MATZ: blue
+- RMZ: blue
+- Prohibited / Restricted / Danger: purple
+- Class G / other: grey

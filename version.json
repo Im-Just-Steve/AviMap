@@ -1,6 +1,6 @@
 {
-  "version": "1.0.8",
+  "version": "1.0.10",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Airspace colours now follow the ICAO charting convention: Class A red, Classes B-G blue, and prohibited/restricted/danger areas red. TMZ/RMZ remain distinct."
+  "releaseNotes": "Corrected UK VFR airspace colours: ATZ and TMZ are magenta; MATZ and RMZ are blue."
 }
