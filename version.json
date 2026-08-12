@@ -1,0 +1,6 @@
+{
+  "version": "1.0.1",
+  "name": "AviMap",
+  "channel": "stable",
+  "releaseNotes": "Fixed startup so the map appears immediately and aviation data loads independently with timeouts."
+}

@@ -1,0 +1,19 @@
+{
+  "name": "AviMap",
+  "short_name": "AviMap",
+  "description": "Independent aviation moving map and flight planning",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef2f0",
+  "theme_color": "#eef2f0",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#eef2f0">
+  <meta name="description" content="AviMap — independent aviation moving map and flight planning">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@6.0.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="styles.css">
+  <title>AviMap</title>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">Avi<span>Map</span></div>
+      <div class="connection" id="connectionStatus">
+        <i></i><span>CONNECTING</span>
+      </div>
+      <button class="settings-button" id="settingsButton" aria-label="Open settings">⚙</button>
+    </header>
+
+    <main id="main">
+      <section class="map-page">
+        <div id="map"></div>
+
+        <div class="map-ui">
+          <div class="top-left-card">
+            <div class="eyebrow">FLIGHT PLAN</div>
+            <div id="routeStatus">NO ROUTE</div>
+            <div class="subtle" id="routeInstruction">Tap an airport or VRP to start.</div>
+          </div>
+
+          <div class="map-controls">
+            <button class="map-button" id="locateButton" aria-label="Centre on aircraft">⌖</button>
+            <button class="map-button" id="zoomInButton" aria-label="Zoom in">+</button>
+            <button class="map-button" id="zoomOutButton" aria-label="Zoom out">−</button>
+          </div>
+
+          <div class="bottom-card" id="flightCard">
+            <div>
+              <span>POSITION</span>
+              <b id="positionValue">WAITING</b>
+            </div>
+            <div>
+              <span>ALT</span>
+              <b id="altitudeValue">—</b>
+            </div>
+            <div>
+              <span>GS</span>
+              <b id="speedValue">—</b>
+            </div>
+            <div>
+              <span>HDG</span>
+              <b id="headingValue">—</b>
+            </div>
+            <button id="clearRouteButton" class="secondary-button">CLEAR</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="sheet hidden" id="selectionSheet">
+    <div class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title-row">
+        <div>
+          <div class="eyebrow" id="selectionType">AIRPORT</div>
+          <h2 id="selectionTitle">EGLL</h2>
+          <p id="selectionSubtitle"></p>
+        </div>
+        <button class="close-button" id="selectionClose" aria-label="Close">×</button>
+      </div>
+      <div class="selection-actions">
+        <button class="action-button" id="selectStartButton">START ROUTE HERE</button>
+        <button class="action-button hidden" id="selectDestinationButton">MAKE DESTINATION</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet hidden" id="settingsSheet">
+    <div class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="sheet-title-row">
+        <div>
+          <div class="eyebrow">AVIMAP</div>
+          <h2>Settings</h2>
+        </div>
+        <button class="close-button" id="settingsClose" aria-label="Close">×</button>
+      </div>
+      <div class="settings-list">
+        <div class="setting-row">
+          <div><b>Airspace</b><span>UK OpenAIP aviation overlay</span></div>
+          <input id="airspaceToggle" type="checkbox" checked>
+        </div>
+        <div class="setting-row">
+          <div><b>Airports</b><span>UK airport database</span></div>
+          <input id="airportToggle" type="checkbox" checked>
+        </div>
+        <div class="setting-row">
+          <div><b>Reporting points</b><span>VRPs / RPP data</span></div>
+          <input id="vrpToggle" type="checkbox" checked>
+        </div>
+      </div>
+      <div class="data-note">
+        <b>Data sources</b>
+        <p>Airport data: OurAirports public-domain dataset. Aviation overlays: OpenAIP community data. Always verify current UK AIP/NOTAM information before real-world flight.</p>
+      </div>
+      <div class="version">AviMap 1.0.0 · Independent implementation</div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
