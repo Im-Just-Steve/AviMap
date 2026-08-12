@@ -328,3 +328,10 @@ and continues to rotate with the live aircraft heading.
 The previous aircraft sprite has been removed from the project. The supplied
 yellow aircraft silhouette is now the only aircraft marker asset:
 `assets/aircraft-marker.png`.
+
+
+## v1.1.0 aircraft trail
+
+AviMap now draws a solid teal trail behind the aircraft using live telemetry.
+The trail uses the AviMap teal (`#2A9D8F`), has rounded joins/caps, and is
+bounded to 50,000 points to avoid unbounded memory use during long sessions.

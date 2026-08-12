@@ -3,6 +3,10 @@ import { DEFAULT_CENTER, DEFAULT_ZOOM } from "./data.js";
 import { haversineNm, bearingDegrees, formatNm } from "./geo.js";
 
 let map;
+let aircraftTrail = [];
+let aircraftTrailSourceAdded = false;
+const AIRCRAFT_TRAIL_COLOR = "#2A9D8F";
+
 let aircraftMarker;
 let selectedFeature;
 let dataState;
@@ -524,32 +528,117 @@ function createAircraftElement() {
   return wrapper;
 }
 
-export function setAircraft(position) {
-  const lon = Number(position?.lon);
-  const lat = Number(position?.lat);
-  const heading = Number.isFinite(Number(position?.heading))
-    ? Number(position.heading)
-    : 0;
+export function setAircraft(data) {
+  const lat = Number(data?.lat);
+  const lon = Number(data?.lon);
 
-  // Never pass NaN/undefined into MapLibre. SimConnect can briefly emit
-  // incomplete values while the connection is initialising.
-  if (!Number.isFinite(lon) || !Number.isFinite(lat) ||
-      lon < -180 || lon > 180 || lat < -90 || lat > 90) {
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon) ||
+    lat < -90 || lat > 90 ||
+    lon < -180 || lon > 180
+  ) {
     return false;
   }
 
   if (!aircraftMarker) {
-    aircraftMarker = new maplibregl.Marker({ element: createAircraftElement() })
+    const el = createAircraftElement();
+    aircraftMarker = new maplibregl.Marker({
+      element: el,
+      rotationAlignment: "map",
+      pitchAlignment: "map"
+    })
       .setLngLat([lon, lat])
       .addTo(map);
   } else {
     aircraftMarker.setLngLat([lon, lat]);
   }
 
-  const icon = aircraftMarker.getElement().querySelector(".aircraft-icon");
-  if (icon) icon.style.transform = `rotate(${heading}deg)`;
+  if (Number.isFinite(Number(data.heading))) {
+    aircraftMarker.setRotation(Number(data.heading));
+  }
+
+  updateAircraftTrail(lon, lat);
   return true;
 }
+
+function updateAircraftTrail(lon, lat) {
+  const point = [lon, lat];
+
+  const previous = aircraftTrail[aircraftTrail.length - 1];
+  if (
+    previous &&
+    Math.abs(previous[0] - lon) < 0.000001 &&
+    Math.abs(previous[1] - lat) < 0.000001
+  ) {
+    return;
+  }
+
+  aircraftTrail.push(point);
+
+  // Keep the trail bounded for long development/test sessions.
+  // This is approximately 50,000 points, far more than a normal flight needs.
+  if (aircraftTrail.length > 50000) {
+    aircraftTrail.splice(0, aircraftTrail.length - 50000);
+  }
+
+  const feature = {
+    type: "Feature",
+    geometry: {
+      type: "LineString",
+      coordinates: aircraftTrail
+    },
+    properties: {}
+  };
+
+  const source = map.getSource("aircraft-trail");
+  if (source) {
+    source.setData(feature);
+    return;
+  }
+
+  map.addSource("aircraft-trail", {
+    type: "geojson",
+    data: feature
+  });
+
+  // Add the trail beneath the aircraft marker and above the base map.
+  // If the existing route/airspace layers have not loaded yet, the layer is
+  // still valid and MapLibre will render it as soon as the style is ready.
+  map.addLayer({
+    id: "aircraft-trail",
+    type: "line",
+    source: "aircraft-trail",
+    layout: {
+      "line-cap": "round",
+      "line-join": "round"
+    },
+    paint: {
+      "line-color": AIRCRAFT_TRAIL_COLOR,
+      "line-width": 4,
+      "line-opacity": 0.95
+    }
+  });
+
+  aircraftTrailSourceAdded = true;
+}
+
+export function clearAircraftTrail() {
+  aircraftTrail = [];
+
+  const source = map.getSource("aircraft-trail");
+  if (source) {
+    source.setData({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: []
+      },
+      properties: {}
+    });
+  }
+}
+
 
 export function centerOn(position) {
   if (!map || !position) return;
