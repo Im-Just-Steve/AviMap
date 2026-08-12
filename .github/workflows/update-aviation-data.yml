@@ -23,189 +23,15 @@ jobs:
 
 
       # ============================================================
-      # DOWNLOAD OPENAIP AIRSPACE
+      # FIND CURRENT NATS DATASETS
       # ============================================================
 
-      - name: Download UK airspace from OpenAIP
-        env:
-          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
+      - name: Find current NATS AIP and VRP datasets
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Downloading UK airspace from OpenAIP"
-          echo "=========================================="
-
-          if [ -z "${OPENAIP_API_KEY:-}" ]; then
-            echo "ERROR: OPENAIP_API_KEY secret is not configured."
-            exit 1
-          fi
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --retry 3 \
-            --retry-delay 5 \
-            -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
-            -H "Accept: application/json" \
-            "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=1" \
-            -o /tmp/openaip-page-1.json
-
-          COUNT=$(jq '.items | length' /tmp/openaip-page-1.json)
-          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page-1.json)
-
-          echo "First page airspaces: ${COUNT}"
-          echo "Total pages: ${TOTAL_PAGES}"
-
-          if [ "${COUNT}" -eq 0 ]; then
-            echo "ERROR: OpenAIP returned zero airspaces."
-            exit 1
-          fi
-
-
-      - name: Download all UK airspace pages
-        env:
-          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
-        run: |
-          set -euo pipefail
-
-          rm -f /tmp/all-airspaces.jsonl
-
-          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page-1.json)
-
-          for PAGE in $(seq 1 "${TOTAL_PAGES}"); do
-
-            echo "Downloading airspace page ${PAGE}/${TOTAL_PAGES}..."
-
-            if [ "${PAGE}" -eq 1 ]; then
-              PAGE_FILE="/tmp/openaip-page-1.json"
-            else
-              PAGE_FILE="/tmp/openaip-page-${PAGE}.json"
-
-              curl \
-                --fail \
-                --silent \
-                --show-error \
-                --retry 3 \
-                --retry-delay 5 \
-                -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
-                -H "Accept: application/json" \
-                "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
-                -o "${PAGE_FILE}"
-            fi
-
-            PAGE_COUNT=$(jq '.items | length' "${PAGE_FILE}")
-
-            echo "  ${PAGE_COUNT} airspaces"
-
-            jq -c '.items[]' "${PAGE_FILE}" >> /tmp/all-airspaces.jsonl
-
-          done
-
-          AIRSPACE_RAW_COUNT=$(wc -l < /tmp/all-airspaces.jsonl)
-
-          echo ""
-          echo "Raw OpenAIP airspaces downloaded: ${AIRSPACE_RAW_COUNT}"
-
-          if [ "${AIRSPACE_RAW_COUNT}" -eq 0 ]; then
-            echo "ERROR: No airspaces were downloaded."
-            exit 1
-          fi
-
-
-      # ============================================================
-      # CONVERT AIRSPACE
-      # ============================================================
-
-      - name: Convert airspace to GeoJSON
-        run: |
-          set -euo pipefail
-
-          mkdir -p /tmp/avimap-data
-
-          node <<'NODE'
-          const fs = require("fs");
-
-          const lines = fs.readFileSync(
-            "/tmp/all-airspaces.jsonl",
-            "utf8"
-          )
-          .split(/\r?\n/)
-          .filter(Boolean);
-
-          const features = [];
-
-          for (const line of lines) {
-            const item = JSON.parse(line);
-
-            let geometry = item.geometry;
-
-            if (typeof geometry === "string") {
-              try {
-                geometry = JSON.parse(geometry);
-              } catch {
-                continue;
-              }
-            }
-
-            if (
-              !geometry ||
-              !geometry.type ||
-              !geometry.coordinates
-            ) {
-              continue;
-            }
-
-            features.push({
-              type: "Feature",
-              id: item._id || item.id,
-
-              properties: {
-                id: item._id || item.id || "",
-                name: item.name || "Unknown airspace",
-                type: item.type ?? "",
-                icaoClass: item.icaoClass ?? "",
-                activity: item.activity ?? "",
-                upperLimit: item.upperLimit ?? null,
-                lowerLimit: item.lowerLimit ?? null,
-                country: item.country ?? "GB"
-              },
-
-              geometry
-            });
-          }
-
-          if (features.length === 0) {
-            throw new Error(
-              "Airspace conversion produced zero valid features."
-            );
-          }
-
-          fs.writeFileSync(
-            "/tmp/avimap-data/uk-airspace.geojson",
-            JSON.stringify({
-              type: "FeatureCollection",
-              features
-            })
-          );
-
-          console.log(
-            `Created ${features.length} airspace features.`
-          );
-          NODE
-
-
-      # ============================================================
-      # FIND CURRENT NATS VRP DATASET
-      # ============================================================
-
-      - name: Find current NATS VRP dataset
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Finding current NATS UK VRP dataset"
+          echo "Finding current NATS datasets"
           echo "=========================================="
 
           curl \
@@ -222,6 +48,11 @@ jobs:
           from datetime import datetime, timezone
           from urllib.parse import urljoin
 
+          BASE = (
+              "https://nats-uk.ead-it.com/"
+              "cms-nats/opencms/en/Publications/digital-datasets/index.html"
+          )
+
           html = open(
               "/tmp/nats.html",
               encoding="utf-8",
@@ -229,118 +60,180 @@ jobs:
           ).read()
 
           hrefs = re.findall(
-              r'href=["\']([^"\']+)["\']',
+              r'href\s*=\s*["\']([^"\']+)["\']',
               html,
               flags=re.I
           )
 
-          datasets = []
+          today = datetime.now(timezone.utc).date()
 
-          for href in hrefs:
-              match = re.search(
-                  r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
-                  href,
-                  flags=re.I
-              )
-
-              if not match:
-                  continue
-
-              try:
-                  effective_date = datetime.strptime(
-                      match.group(1),
-                      "%Y%m%d"
-                  ).date()
-              except ValueError:
-                  continue
-
-              datasets.append(
-                  (effective_date, href)
-              )
-
-          if not datasets:
-              print("ERROR: No NATS VRP ZIP datasets found.")
-              print("")
-              print("VRP links found:")
+          def find_current(pattern):
+              found = []
 
               for href in hrefs:
-                  if "VRP" in href.upper():
-                      print(href)
+                  match = re.search(
+                      pattern,
+                      href,
+                      flags=re.I
+                  )
 
-              raise SystemExit(1)
+                  if not match:
+                      continue
 
-          today = datetime.now(
-              timezone.utc
-          ).date()
+                  try:
+                      date = datetime.strptime(
+                          match.group(1),
+                          "%Y%m%d"
+                      ).date()
+                  except ValueError:
+                      continue
 
-          print("")
-          print("Available NATS VRP datasets:")
+                  found.append(
+                      (date, href)
+                  )
 
-          for date, href in sorted(datasets):
-              marker = ""
+              if not found:
+                  return None
 
-              if date <= today:
-                  marker = " <-- current/available"
+              current = [
+                  item
+                  for item in found
+                  if item[0] <= today
+              ]
 
-              print(
-                  f"  {date}  {href}{marker}"
-              )
+              if current:
+                  date, href = max(
+                      current,
+                      key=lambda item: item[0]
+                  )
+              else:
+                  date, href = min(
+                      found,
+                      key=lambda item: item[0]
+                  )
 
-          current = [
-              item
-              for item in datasets
-              if item[0] <= today
-          ]
+              return date, urljoin(BASE, href)
 
-          if current:
-              effective_date, href = max(
-                  current,
-                  key=lambda item: item[0]
-              )
-          else:
-              effective_date, href = min(
-                  datasets,
-                  key=lambda item: item[0]
-              )
-
-          url = urljoin(
-              "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html",
-              href
+          aip_xml = find_current(
+              r'EG_AIP_DS_FULL_(\d{8})\.XML$'
           )
 
+          aip_kml = find_current(
+              r'EG_AIP_DS_FULL_(\d{8})\.KML$'
+          )
+
+          vrp_csv = find_current(
+              r'EG_VRP_DS_AREA1_FULL_(\d{8})\.CSV$'
+          )
+
+          if not aip_xml:
+              raise SystemExit(
+                  "ERROR: Could not find a current NATS UK ICAO AIP XML dataset."
+              )
+
+          if not aip_kml:
+              raise SystemExit(
+                  "ERROR: Could not find a current NATS UK ICAO AIP KML dataset."
+              )
+
+          if not vrp_csv:
+              raise SystemExit(
+                  "ERROR: Could not find a current NATS VRP CSV dataset."
+              )
+
           print("")
           print("==========================================")
-          print("SELECTED NATS VRP DATASET")
+          print("SELECTED NATS DATASETS")
           print("==========================================")
           print("")
-          print(f"Effective date: {effective_date}")
-          print(f"URL: {url}")
+          print("AIP XML:")
+          print(aip_xml[0], aip_xml[1])
+          print("")
+          print("AIP KML:")
+          print(aip_kml[0], aip_kml[1])
+          print("")
+          print("VRP CSV:")
+          print(vrp_csv[0], vrp_csv[1])
           print("")
 
-          with open("/tmp/nats-vrp-url.txt", "w") as f:
-              f.write(url)
+          open("/tmp/nats-aip-xml-url.txt", "w").write(aip_xml[1])
+          open("/tmp/nats-aip-kml-url.txt", "w").write(aip_kml[1])
+          open("/tmp/nats-vrp-url.txt", "w").write(vrp_csv[1])
 
-          with open("/tmp/nats-vrp-date.txt", "w") as f:
-              f.write(str(effective_date))
+          open("/tmp/nats-airac-date.txt", "w").write(
+              str(aip_xml[0])
+          )
           PY
 
 
       # ============================================================
-      # DOWNLOAD AND EXTRACT NATS VRP ZIP
+      # DOWNLOAD NATS AIP DATA
       # ============================================================
 
-      - name: Download and extract NATS VRPs
+      - name: Download NATS UK ICAO AIP dataset
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/nats
+
+          AIP_XML_URL=$(cat /tmp/nats-aip-xml-url.txt)
+          AIP_KML_URL=$(cat /tmp/nats-aip-kml-url.txt)
+
+          echo "=========================================="
+          echo "Downloading NATS UK ICAO AIP dataset"
+          echo "=========================================="
+
+          echo ""
+          echo "AIXM XML:"
+          echo "${AIP_XML_URL}"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            -L \
+            "${AIP_XML_URL}" \
+            -o /tmp/nats/aip.xml
+
+          echo ""
+          echo "KML:"
+          echo "${AIP_KML_URL}"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            -L \
+            "${AIP_KML_URL}" \
+            -o /tmp/nats/aip.kml
+
+          test -s /tmp/nats/aip.xml
+          test -s /tmp/nats/aip.kml
+
+          echo ""
+          echo "Downloaded files:"
+          ls -lh /tmp/nats/
+
+
+      # ============================================================
+      # DOWNLOAD NATS VRP DATA
+      # ============================================================
+
+      - name: Download NATS VRP CSV
         run: |
           set -euo pipefail
 
           VRP_URL=$(cat /tmp/nats-vrp-url.txt)
 
           echo "=========================================="
-          echo "Downloading NATS VRP ZIP"
+          echo "Downloading NATS VRP dataset"
           echo "=========================================="
-          echo "${VRP_URL}"
 
-          mkdir -p /tmp/nats-vrp
+          echo "${VRP_URL}"
 
           curl \
             --fail \
@@ -350,43 +243,279 @@ jobs:
             --retry-delay 5 \
             -L \
             "${VRP_URL}" \
-            -o /tmp/nats-vrp.zip
+            -o /tmp/nats/vrps.csv
 
-          test -s /tmp/nats-vrp.zip
-
-          echo ""
-          echo "ZIP contents:"
-          unzip -l /tmp/nats-vrp.zip
-
-          unzip \
-            -o \
-            /tmp/nats-vrp.zip \
-            -d /tmp/nats-vrp
-
-          VRP_CSV=$(find \
-            /tmp/nats-vrp \
-            -type f \
-            \( -iname "*.csv" -o -iname "*.CSV" \) \
-            | head -n 1)
-
-          if [ -z "${VRP_CSV}" ]; then
-            echo "ERROR: No CSV found inside NATS VRP ZIP."
-            exit 1
-          fi
+          test -s /tmp/nats/vrps.csv
 
           echo ""
-          echo "Selected VRP CSV:"
-          echo "${VRP_CSV}"
-
-          cp "${VRP_CSV}" /tmp/uk-vrps.csv
-
-          echo ""
-          echo "CSV size:"
-          wc -c /tmp/uk-vrps.csv
+          echo "VRP CSV:"
+          ls -lh /tmp/nats/vrps.csv
 
 
       # ============================================================
-      # CONVERT NATS VRPs TO GEOJSON
+      # CONVERT NATS AIP KML AIRSPACE TO GEOJSON
+      #
+      # NATS AIXM XML is downloaded and retained as the authoritative
+      # dataset. The associated NATS KML supplies the polygon
+      # geometry in a directly consumable form.
+      # ============================================================
+
+      - name: Convert NATS airspace to GeoJSON
+        run: |
+          set -euo pipefail
+
+          mkdir -p /tmp/avimap-data
+
+          python3 <<'PY'
+          import json
+          import re
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          KML = "/tmp/nats/aip.kml"
+
+          tree = ET.parse(KML)
+          root = tree.getroot()
+
+          def local(tag):
+              return tag.split("}", 1)[-1].lower()
+
+          def child_text(element, wanted):
+              for child in element.iter():
+                  if local(child.tag) == wanted.lower():
+                      text = "".join(child.itertext()).strip()
+                      if text:
+                          return text
+              return ""
+
+          def all_text(element):
+              return " ".join(
+                  text.strip()
+                  for text in element.itertext()
+                  if text and text.strip()
+              )
+
+          def parse_coordinates(text):
+              coords = []
+
+              for token in re.split(r"\s+", text.strip()):
+                  if not token:
+                      continue
+
+                  parts = token.split(",")
+
+                  if len(parts) < 2:
+                      continue
+
+                  try:
+                      lon = float(parts[0])
+                      lat = float(parts[1])
+                  except ValueError:
+                      continue
+
+                  if -180 <= lon <= 180 and -90 <= lat <= 90:
+                      coords.append([lon, lat])
+
+              return coords
+
+          def classify(text):
+              t = text.upper()
+
+              # P/R/D have priority over generic controlled terms.
+              if re.search(r"\b(PROHIBITED|RESTRICTED|DANGER)\b", t):
+                  return "PRD"
+
+              if re.search(r"\bP[\s-]?(AREA|ZONE)?\b", t):
+                  return "PRD"
+
+              if re.search(r"\bR[\s-]?(AREA|ZONE)?\b", t):
+                  return "PRD"
+
+              if re.search(r"\bD[\s-]?(AREA|ZONE)?\b", t):
+                  return "PRD"
+
+              if re.search(r"\bATZ\b", t):
+                  return "ATZ"
+
+              if re.search(r"\bTMZ\b", t):
+                  return "TMZ"
+
+              if re.search(r"\bMATZ\b", t):
+                  return "MATZ"
+
+              if re.search(r"\bRMZ\b", t):
+                  return "RMZ"
+
+              if re.search(r"\bCLASS\s*A\b", t):
+                  return "CLASS_A"
+
+              if re.search(r"\bCLASS\s*[BCD]\b", t):
+                  return "CONTROLLED"
+
+              if re.search(
+                  r"\b(CTA|CTR|TMA|CTZ|CTA\/CTR|CONTROLLED)\b",
+                  t
+              ):
+                  return "CONTROLLED"
+
+              return "OTHER"
+
+          def geometry_from_polygon(polygon):
+              rings = []
+
+              for child in polygon.iter():
+                  if local(child.tag) != "coordinates":
+                      continue
+
+                  coords = parse_coordinates(
+                      "".join(child.itertext())
+                  )
+
+                  if len(coords) >= 3:
+                      if coords[0] != coords[-1]:
+                          coords.append(coords[0])
+
+                      rings.append(coords)
+
+              if not rings:
+                  return None
+
+              # KML first ring is normally the outer boundary.
+              # Additional rings are holes.
+              return {
+                  "type": "Polygon",
+                  "coordinates": rings
+              }
+
+          features = []
+
+          for placemark in root.iter():
+              if local(placemark.tag) != "placemark":
+                  continue
+
+              name = child_text(
+                  placemark,
+                  "name"
+              )
+
+              description = child_text(
+                  placemark,
+                  "description"
+              )
+
+              extended = all_text(
+                  placemark
+              )
+
+              searchable = " ".join(
+                  [
+                      name,
+                      description,
+                      extended
+                  ]
+              )
+
+              geometries = []
+
+              for polygon in placemark.iter():
+                  if local(polygon.tag) != "polygon":
+                      continue
+
+                  geometry = geometry_from_polygon(
+                      polygon
+                  )
+
+                  if geometry:
+                      geometries.append(
+                          geometry
+                      )
+
+              if not geometries:
+                  continue
+
+              # We only want polygonal airspace-type records.
+              # The NATS AIP KML contains other AIP information;
+              # obvious non-airspace records are ignored.
+              category = classify(searchable)
+
+              if category == "OTHER":
+                  airspace_hint = re.search(
+                      r"\b(AIRSPACE|ATZ|TMZ|MATZ|RMZ|CTA|CTR|TMA|CTZ|"
+                      r"PROHIBITED|RESTRICTED|DANGER|CLASS\s*[A-G])\b",
+                      searchable,
+                      flags=re.I
+                  )
+
+                  if not airspace_hint:
+                      continue
+
+              if len(geometries) == 1:
+                  geometry = geometries[0]
+              else:
+                  geometry = {
+                      "type": "MultiPolygon",
+                      "coordinates": [
+                          geometry["coordinates"]
+                          for geometry in geometries
+                      ]
+                  }
+
+              properties = {
+                  "name": name or "NATS airspace",
+                  "description": description,
+                  "category": category,
+                  "source": "NATS UK ICAO AIP Dataset",
+                  "airac": Path(
+                      "/tmp/nats-airac-date.txt"
+                  ).read_text().strip()
+              }
+
+              features.append({
+                  "type": "Feature",
+                  "properties": properties,
+                  "geometry": geometry
+              })
+
+          if not features:
+              raise SystemExit(
+                  "ERROR: NATS AIP KML produced zero airspace polygons."
+              )
+
+          output = {
+              "type": "FeatureCollection",
+              "features": features
+          }
+
+          Path(
+              "/tmp/avimap-data/uk-airspace.geojson"
+          ).write_text(
+              json.dumps(
+                  output,
+                  separators=(",", ":")
+              ),
+              encoding="utf-8"
+          )
+
+          counts = {}
+
+          for feature in features:
+              category = feature["properties"]["category"]
+              counts[category] = counts.get(category, 0) + 1
+
+          print("")
+          print("==========================================")
+          print("NATS AIRSPACE RESULT")
+          print("==========================================")
+          print("")
+          print(f"Airspace polygons: {len(features)}")
+
+          for category, count in sorted(counts.items()):
+              print(f"  {category}: {count}")
+          PY
+
+
+      # ============================================================
+      # CONVERT NATS VRPS
       # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
@@ -400,7 +529,7 @@ jobs:
           from pathlib import Path
 
           raw = Path(
-              "/tmp/uk-vrps.csv"
+              "/tmp/nats/vrps.csv"
           ).read_text(
               encoding="utf-8-sig",
               errors="replace"
@@ -421,19 +550,12 @@ jobs:
               )
           )
 
-          print(f"CSV records: {len(rows)}")
-
           if not rows:
               raise SystemExit(
                   "ERROR: NATS VRP CSV contains zero records."
               )
 
           fields = list(rows[0].keys())
-
-          print("")
-          print("CSV fields:")
-          for field in fields:
-              print(f"  {field}")
 
           def norm(value):
               return re.sub(
@@ -489,27 +611,12 @@ jobs:
               "Longitude Decimal"
           )
 
-          print("")
-          print("Detected fields:")
-          print(f"  Name:      {name_field}")
-          print(f"  Latitude:  {lat_field}")
-          print(f"  Longitude: {lon_field}")
-
           if not lat_field or not lon_field:
               raise SystemExit(
-                  "ERROR: Could not identify NATS latitude/longitude fields."
+                  "ERROR: Could not identify NATS VRP latitude/longitude fields."
               )
 
           def parse_coord(value, latitude):
-              """
-              NATS VRP coordinates use:
-                Latitude  DDMMSS[.decimal]
-                Longitude DDDMMSS[.decimal]
-
-              The parser also accepts conventional decimal degrees
-              and DMS values with N/S/E/W.
-              """
-
               if value is None:
                   return None
 
@@ -532,10 +639,7 @@ jobs:
                   hemisphere = match.group(1).upper()
                   text = text[:match.start()].strip()
 
-              # ----------------------------------------------
-              # Ordinary decimal degrees
-              # ----------------------------------------------
-
+              # Decimal degrees.
               try:
                   number = float(text)
 
@@ -548,13 +652,8 @@ jobs:
                           number = abs(number)
 
                       return number
-
               except ValueError:
                   pass
-
-              # ----------------------------------------------
-              # Remove DMS separators.
-              # ----------------------------------------------
 
               compact = (
                   text
@@ -562,18 +661,13 @@ jobs:
                   .replace("'", "")
                   .replace('"', "")
                   .replace(" ", "")
-                  .strip()
               )
 
-              # ----------------------------------------------
               # NATS compact DDMMSS / DDDMMSS.
-              # ----------------------------------------------
-
               if re.fullmatch(
                   r"\d+(?:\.\d+)?",
                   compact
               ):
-
                   try:
                       if "." in compact:
                           integer_part, decimal_part = compact.split(
@@ -588,52 +682,28 @@ jobs:
                           if len(integer_part) < 6:
                               raise ValueError
 
-                          degrees = int(
-                              integer_part[:2]
-                          )
-
-                          minutes = int(
-                              integer_part[2:4]
-                          )
-
-                          seconds_text = (
-                              integer_part[4:]
-                          )
-
+                          degrees = int(integer_part[:2])
+                          minutes = int(integer_part[2:4])
+                          seconds_text = integer_part[4:]
                       else:
                           if len(integer_part) < 7:
                               raise ValueError
 
-                          degrees = int(
-                              integer_part[:3]
-                          )
-
-                          minutes = int(
-                              integer_part[3:5]
-                          )
-
-                          seconds_text = (
-                              integer_part[5:]
-                          )
+                          degrees = int(integer_part[:3])
+                          minutes = int(integer_part[3:5])
+                          seconds_text = integer_part[5:]
 
                       if decimal_part:
-                          seconds_text += (
-                              "." + decimal_part
-                          )
+                          seconds_text += "." + decimal_part
 
-                      seconds = float(
-                          seconds_text
-                      )
+                      seconds = float(seconds_text)
 
                       limit = 90 if latitude else 180
 
                       if degrees > limit:
                           raise ValueError
 
-                      if minutes >= 60:
-                          raise ValueError
-
-                      if seconds >= 60:
+                      if minutes >= 60 or seconds >= 60:
                           raise ValueError
 
                       result = (
@@ -644,7 +714,6 @@ jobs:
 
                       if hemisphere in ("S", "W"):
                           result = -abs(result)
-
                       elif hemisphere in ("N", "E"):
                           result = abs(result)
 
@@ -656,10 +725,7 @@ jobs:
                   ):
                       pass
 
-              # ----------------------------------------------
               # Conventional DMS fallback.
-              # ----------------------------------------------
-
               try:
                   numbers = re.findall(
                       r"[-+]?\d+(?:\.\d+)?",
@@ -675,18 +741,8 @@ jobs:
                   ]
 
                   degrees = abs(values[0])
-
-                  minutes = (
-                      abs(values[1])
-                      if len(values) > 1
-                      else 0
-                  )
-
-                  seconds = (
-                      abs(values[2])
-                      if len(values) > 2
-                      else 0
-                  )
+                  minutes = abs(values[1]) if len(values) > 1 else 0
+                  seconds = abs(values[2]) if len(values) > 2 else 0
 
                   if minutes >= 60 or seconds >= 60:
                       return None
@@ -699,10 +755,8 @@ jobs:
 
                   if hemisphere in ("S", "W"):
                       result = -abs(result)
-
                   elif hemisphere in ("N", "E"):
                       result = abs(result)
-
                   elif values[0] < 0:
                       result = -result
 
@@ -720,10 +774,9 @@ jobs:
                   return None
 
           features = []
-          invalid_coordinates = 0
+          invalid = 0
 
           for index, row in enumerate(rows, 1):
-
               latitude = parse_coord(
                   row.get(lat_field),
                   True
@@ -735,15 +788,15 @@ jobs:
               )
 
               if latitude is None or longitude is None:
-                  invalid_coordinates += 1
+                  invalid += 1
                   continue
 
               if not -90 <= latitude <= 90:
-                  invalid_coordinates += 1
+                  invalid += 1
                   continue
 
               if not -180 <= longitude <= 180:
-                  invalid_coordinates += 1
+                  invalid += 1
                   continue
 
               name = ""
@@ -764,6 +817,7 @@ jobs:
 
               properties["name"] = name
               properties["ident"] = name
+              properties["source"] = "NATS VRP List"
 
               features.append({
                   "type": "Feature",
@@ -779,48 +833,41 @@ jobs:
 
           print("")
           print("==========================================")
-          print("VRP CONVERSION RESULT")
+          print("NATS VRP RESULT")
           print("==========================================")
           print("")
-          print(f"CSV records:          {len(rows)}")
-          print(f"Valid VRPs:           {len(features)}")
-          print(f"Invalid coordinates:  {invalid_coordinates}")
+          print(f"CSV records:         {len(rows)}")
+          print(f"Valid VRPs:          {len(features)}")
+          print(f"Invalid coordinates: {invalid}")
           print("")
 
-          # HARD SAFETY CHECK:
-          # Never write an empty VRP dataset.
+          # HARD SAFETY CHECK.
           if len(features) == 0:
               raise SystemExit(
-                  "ERROR: VRP conversion produced ZERO valid features. "
-                  "The existing repository data will NOT be replaced."
+                  "ERROR: NATS VRP conversion produced ZERO valid VRPs. "
+                  "Existing repository data will NOT be replaced."
               )
-
-          output = {
-              "type": "FeatureCollection",
-              "features": features
-          }
 
           Path(
               "/tmp/avimap-data/uk-reporting-points.geojson"
           ).write_text(
               json.dumps(
-                  output,
+                  {
+                      "type": "FeatureCollection",
+                      "features": features
+                  },
                   separators=(",", ":")
               ),
               encoding="utf-8"
-          )
-
-          print(
-              f"Created {len(features)} UK VRP features."
           )
           PY
 
 
       # ============================================================
-      # VALIDATE BOTH DATASETS BEFORE TOUCHING REPOSITORY FILES
+      # FINAL VALIDATION
       # ============================================================
 
-      - name: Validate generated aviation data
+      - name: Validate NATS generated data
         run: |
           set -euo pipefail
 
@@ -836,7 +883,7 @@ jobs:
 
           echo ""
           echo "=========================================="
-          echo "FINAL GENERATED DATA COUNTS"
+          echo "FINAL NATS DATA COUNTS"
           echo "=========================================="
           echo ""
           echo "Airspaces : ${AIRSPACE_COUNT}"
@@ -844,24 +891,24 @@ jobs:
           echo ""
 
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
-            echo "ERROR: Generated airspace dataset is empty."
+            echo "ERROR: NATS airspace dataset is empty."
             exit 1
           fi
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
-            echo "ERROR: Generated VRP dataset is empty."
+            echo "ERROR: NATS VRP dataset is empty."
             exit 1
           fi
 
           echo "Validation successful."
-          echo "Repository data has not been changed yet."
+          echo "Existing repository data has not been changed yet."
 
 
       # ============================================================
-      # ONLY AFTER VALIDATION, REPLACE REPOSITORY DATA
+      # ONLY NOW REPLACE REPOSITORY DATA
       # ============================================================
 
-      - name: Install validated aviation data
+      - name: Install validated NATS data
         run: |
           set -euo pipefail
 
@@ -875,15 +922,29 @@ jobs:
             /tmp/avimap-data/uk-reporting-points.geojson \
             data/uk-reporting-points.geojson
 
-          echo ""
-          echo "Validated aviation data copied into repository."
+          cat > data/SOURCES.md <<'EOF'
+          # AviMap UK aviation data
+
+          Aviation data is sourced from NATS UK digital datasets.
+
+          Airspace:
+          - UK ICAO AIP Dataset
+          - NATS AIP KML geometry
+          - NATS AIXM XML dataset downloaded during the same workflow
+
+          Reporting points:
+          - NATS Visual Reference Points (VRP) List
+
+          The GitHub Actions workflow validates that both datasets contain
+          features before replacing the repository data.
+          EOF
 
 
       # ============================================================
-      # COMMIT ONLY IF DATA ACTUALLY CHANGED
+      # COMMIT
       # ============================================================
 
-      - name: Commit updated aviation data
+      - name: Commit updated NATS aviation data
         run: |
           set -euo pipefail
 
@@ -897,7 +958,8 @@ jobs:
 
           git add \
             data/uk-airspace.geojson \
-            data/uk-reporting-points.geojson
+            data/uk-reporting-points.geojson \
+            data/SOURCES.md
 
           echo ""
           echo "=========================================="
@@ -912,22 +974,16 @@ jobs:
 
           else
 
-            echo "Changes detected:"
-            echo ""
-
             git diff --cached --stat
 
-            echo ""
-            echo "Committing updated aviation data..."
-
             git commit \
-              -m "Update UK aviation data"
+              -m "Update UK aviation data from NATS"
 
             git push
 
             echo ""
             echo "=========================================="
-            echo "UPDATE COMPLETE"
+            echo "NATS AVIATION DATA UPDATE COMPLETE"
             echo "=========================================="
 
           fi
