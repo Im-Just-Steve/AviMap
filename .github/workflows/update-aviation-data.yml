@@ -23,20 +23,23 @@ jobs:
 
 
       # ============================================================
-      # OPENAIP AIRSPACE
+      # DOWNLOAD OPENAIP AIRSPACE
       # ============================================================
 
       - name: Download UK airspace from OpenAIP
         env:
           OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
         run: |
-          set -e
-
-          mkdir -p data
+          set -euo pipefail
 
           echo "=========================================="
           echo "Downloading UK airspace from OpenAIP"
           echo "=========================================="
+
+          if [ -z "${OPENAIP_API_KEY:-}" ]; then
+            echo "ERROR: OPENAIP_API_KEY secret is not configured."
+            exit 1
+          fi
 
           curl \
             --fail \
@@ -49,19 +52,13 @@ jobs:
             "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=1" \
             -o /tmp/openaip-page-1.json
 
-          echo ""
-          echo "OpenAIP response:"
-
-          jq '{
-            totalCount: .totalCount,
-            totalPages: .totalPages,
-            page: .page,
-            items: (.items | length)
-          }' /tmp/openaip-page-1.json
-
           COUNT=$(jq '.items | length' /tmp/openaip-page-1.json)
+          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page-1.json)
 
-          if [ "$COUNT" -eq 0 ]; then
+          echo "First page airspaces: ${COUNT}"
+          echo "Total pages: ${TOTAL_PAGES}"
+
+          if [ "${COUNT}" -eq 0 ]; then
             echo "ERROR: OpenAIP returned zero airspaces."
             exit 1
           fi
@@ -71,29 +68,20 @@ jobs:
         env:
           OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
         run: |
-          set -e
+          set -euo pipefail
 
           rm -f /tmp/all-airspaces.jsonl
 
           TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page-1.json)
 
-          echo ""
-          echo "Total airspace pages: $TOTAL_PAGES"
-          echo ""
+          for PAGE in $(seq 1 "${TOTAL_PAGES}"); do
 
-          PAGE=1
+            echo "Downloading airspace page ${PAGE}/${TOTAL_PAGES}..."
 
-          while [ "$PAGE" -le "$TOTAL_PAGES" ]; do
-
-            echo "Downloading airspace page $PAGE of $TOTAL_PAGES..."
-
-            if [ "$PAGE" -eq 1 ]; then
-
-              cp \
-                /tmp/openaip-page-1.json \
-                "/tmp/page-${PAGE}.json"
-
+            if [ "${PAGE}" -eq 1 ]; then
+              PAGE_FILE="/tmp/openaip-page-1.json"
             else
+              PAGE_FILE="/tmp/openaip-page-${PAGE}.json"
 
               curl \
                 --fail \
@@ -104,44 +92,39 @@ jobs:
                 -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
                 -H "Accept: application/json" \
                 "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
-                -o "/tmp/page-${PAGE}.json"
-
+                -o "${PAGE_FILE}"
             fi
 
-            COUNT=$(jq '.items | length' "/tmp/page-${PAGE}.json")
+            PAGE_COUNT=$(jq '.items | length' "${PAGE_FILE}")
 
-            echo "Page $PAGE contains $COUNT airspaces."
+            echo "  ${PAGE_COUNT} airspaces"
 
-            jq -c '.items[]' "/tmp/page-${PAGE}.json" \
-              >> /tmp/all-airspaces.jsonl
-
-            PAGE=$((PAGE + 1))
+            jq -c '.items[]' "${PAGE_FILE}" >> /tmp/all-airspaces.jsonl
 
           done
 
-          TOTAL=$(wc -l < /tmp/all-airspaces.jsonl)
+          AIRSPACE_RAW_COUNT=$(wc -l < /tmp/all-airspaces.jsonl)
 
           echo ""
-          echo "=========================================="
-          echo "TOTAL AIRSPACES DOWNLOADED: $TOTAL"
-          echo "=========================================="
+          echo "Raw OpenAIP airspaces downloaded: ${AIRSPACE_RAW_COUNT}"
 
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "ERROR: No airspaces downloaded."
+          if [ "${AIRSPACE_RAW_COUNT}" -eq 0 ]; then
+            echo "ERROR: No airspaces were downloaded."
             exit 1
           fi
 
 
       # ============================================================
-      # CONVERT AIRSPACE TO GEOJSON
+      # CONVERT AIRSPACE
       # ============================================================
 
       - name: Convert airspace to GeoJSON
         run: |
-          set -e
+          set -euo pipefail
+
+          mkdir -p /tmp/avimap-data
 
           node <<'NODE'
-
           const fs = require("fs");
 
           const lines = fs.readFileSync(
@@ -154,23 +137,16 @@ jobs:
           const features = [];
 
           for (const line of lines) {
-
             const item = JSON.parse(line);
 
             let geometry = item.geometry;
 
             if (typeof geometry === "string") {
-
               try {
-
                 geometry = JSON.parse(geometry);
-
               } catch {
-
                 continue;
-
               }
-
             }
 
             if (
@@ -178,84 +154,45 @@ jobs:
               !geometry.type ||
               !geometry.coordinates
             ) {
-
               continue;
-
             }
 
             features.push({
-
               type: "Feature",
-
               id: item._id || item.id,
 
               properties: {
-
                 id: item._id || item.id || "",
-
-                name:
-                  item.name ||
-                  "Unknown airspace",
-
-                type:
-                  item.type ??
-                  "",
-
-                icaoClass:
-                  item.icaoClass ??
-                  "",
-
-                activity:
-                  item.activity ??
-                  "",
-
-                upperLimit:
-                  item.upperLimit ??
-                  null,
-
-                lowerLimit:
-                  item.lowerLimit ??
-                  null,
-
-                country:
-                  item.country ??
-                  "GB"
-
+                name: item.name || "Unknown airspace",
+                type: item.type ?? "",
+                icaoClass: item.icaoClass ?? "",
+                activity: item.activity ?? "",
+                upperLimit: item.upperLimit ?? null,
+                lowerLimit: item.lowerLimit ?? null,
+                country: item.country ?? "GB"
               },
 
               geometry
-
             });
-
           }
 
-          if (!features.length) {
-
+          if (features.length === 0) {
             throw new Error(
-              "Airspace conversion produced zero features."
+              "Airspace conversion produced zero valid features."
             );
-
           }
 
           fs.writeFileSync(
-
-            "data/uk-airspace.geojson",
-
+            "/tmp/avimap-data/uk-airspace.geojson",
             JSON.stringify({
-
-              type:
-                "FeatureCollection",
-
+              type: "FeatureCollection",
               features
-
             })
-
           );
 
           console.log(
             `Created ${features.length} airspace features.`
           );
-
           NODE
 
 
@@ -265,7 +202,7 @@ jobs:
 
       - name: Find current NATS VRP dataset
         run: |
-          set -e
+          set -euo pipefail
 
           echo "=========================================="
           echo "Finding current NATS UK VRP dataset"
@@ -281,13 +218,9 @@ jobs:
             -o /tmp/nats.html
 
           python3 <<'PY'
-
           import re
-
           from datetime import datetime, timezone
-
           from urllib.parse import urljoin
-
 
           html = open(
               "/tmp/nats.html",
@@ -295,19 +228,15 @@ jobs:
               errors="replace"
           ).read()
 
-
           hrefs = re.findall(
               r'href=["\']([^"\']+)["\']',
               html,
               flags=re.I
           )
 
-
           datasets = []
 
-
           for href in hrefs:
-
               match = re.search(
                   r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
                   href,
@@ -317,76 +246,45 @@ jobs:
               if not match:
                   continue
 
-
-              date_text = match.group(1)
-
-
               try:
-
                   effective_date = datetime.strptime(
-                      date_text,
+                      match.group(1),
                       "%Y%m%d"
                   ).date()
-
               except ValueError:
-
                   continue
 
-
               datasets.append(
-                  (
-                      effective_date,
-                      href
-                  )
+                  (effective_date, href)
               )
-
 
           if not datasets:
-
-              print(
-                  "ERROR: No NATS VRP ZIP datasets found."
-              )
-
+              print("ERROR: No NATS VRP ZIP datasets found.")
               print("")
-              print(
-                  "VRP links found:"
-              )
-
+              print("VRP links found:")
 
               for href in hrefs:
-
                   if "VRP" in href.upper():
-
                       print(href)
 
-
               raise SystemExit(1)
-
 
           today = datetime.now(
               timezone.utc
           ).date()
 
-
           print("")
-          print(
-              "Available NATS VRP datasets:"
-          )
-
+          print("Available NATS VRP datasets:")
 
           for date, href in sorted(datasets):
-
               marker = ""
 
               if date <= today:
-
                   marker = " <-- current/available"
-
 
               print(
                   f"  {date}  {href}{marker}"
               )
-
 
           current = [
               item
@@ -394,96 +292,55 @@ jobs:
               if item[0] <= today
           ]
 
-
           if current:
-
               effective_date, href = max(
                   current,
                   key=lambda item: item[0]
               )
-
           else:
-
               effective_date, href = min(
                   datasets,
                   key=lambda item: item[0]
               )
 
-
           url = urljoin(
-
               "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html",
-
               href
-
-          )
-
-
-          print("")
-          print(
-              "=========================================="
-          )
-
-          print(
-              "SELECTED NATS VRP DATASET"
-          )
-
-          print(
-              "=========================================="
           )
 
           print("")
-
-          print(
-              "Effective date:",
-              effective_date
-          )
-
-          print(
-              "URL:",
-              url
-          )
-
+          print("==========================================")
+          print("SELECTED NATS VRP DATASET")
+          print("==========================================")
+          print("")
+          print(f"Effective date: {effective_date}")
+          print(f"URL: {url}")
           print("")
 
+          with open("/tmp/nats-vrp-url.txt", "w") as f:
+              f.write(url)
 
-          open(
-              "/tmp/nats-vrp-url.txt",
-              "w"
-          ).write(url)
-
-
-          open(
-              "/tmp/nats-vrp-date.txt",
-              "w"
-          ).write(
-              str(effective_date)
-          )
-
+          with open("/tmp/nats-vrp-date.txt", "w") as f:
+              f.write(str(effective_date))
           PY
 
 
       # ============================================================
-      # DOWNLOAD NATS VRP ZIP
+      # DOWNLOAD AND EXTRACT NATS VRP ZIP
       # ============================================================
 
-      - name: Download NATS VRPs
+      - name: Download and extract NATS VRPs
         run: |
-          set -e
+          set -euo pipefail
 
           VRP_URL=$(cat /tmp/nats-vrp-url.txt)
 
           echo "=========================================="
-          echo "Downloading NATS VRP dataset"
+          echo "Downloading NATS VRP ZIP"
           echo "=========================================="
-
-          echo ""
-          echo "URL:"
-          echo "$VRP_URL"
-          echo ""
+          echo "${VRP_URL}"
 
           mkdir -p /tmp/nats-vrp
-
 
           curl \
             --fail \
@@ -492,115 +349,55 @@ jobs:
             --retry 3 \
             --retry-delay 5 \
             -L \
-            "$VRP_URL" \
+            "${VRP_URL}" \
             -o /tmp/nats-vrp.zip
 
-
-          if [ ! -s /tmp/nats-vrp.zip ]; then
-
-            echo "ERROR: NATS VRP ZIP is empty."
-
-            exit 1
-
-          fi
-
-
-          echo ""
-          echo "Downloaded ZIP:"
-
-          ls -lh /tmp/nats-vrp.zip
-
+          test -s /tmp/nats-vrp.zip
 
           echo ""
           echo "ZIP contents:"
-
           unzip -l /tmp/nats-vrp.zip
-
-
-          echo ""
-          echo "Extracting..."
 
           unzip \
             -o \
             /tmp/nats-vrp.zip \
             -d /tmp/nats-vrp
 
-
-          echo ""
-          echo "Extracted files:"
-
-          find \
-            /tmp/nats-vrp \
-            -type f \
-            -print
-
-
           VRP_CSV=$(find \
             /tmp/nats-vrp \
             -type f \
-            \( \
-              -iname "*.csv" \
-              -o \
-              -iname "*.CSV" \
-            \) \
+            \( -iname "*.csv" -o -iname "*.CSV" \) \
             | head -n 1)
 
-
-          if [ -z "$VRP_CSV" ]; then
-
-            echo ""
-            echo "ERROR: No CSV file found inside NATS VRP ZIP."
-
+          if [ -z "${VRP_CSV}" ]; then
+            echo "ERROR: No CSV found inside NATS VRP ZIP."
             exit 1
-
           fi
-
 
           echo ""
           echo "Selected VRP CSV:"
+          echo "${VRP_CSV}"
 
-          echo "$VRP_CSV"
-
-
-          cp \
-            "$VRP_CSV" \
-            /tmp/uk-vrps.csv
-
+          cp "${VRP_CSV}" /tmp/uk-vrps.csv
 
           echo ""
           echo "CSV size:"
-
           wc -c /tmp/uk-vrps.csv
 
 
-          echo ""
-          echo "First 10 lines:"
-
-          head \
-            -n 10 \
-            /tmp/uk-vrps.csv
-
-
       # ============================================================
-      # CONVERT NATS VRPS TO GEOJSON
+      # CONVERT NATS VRPs TO GEOJSON
       # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
         run: |
-          set -e
+          set -euo pipefail
 
           python3 <<'PY'
-
           import csv
           import json
           import re
-
           from pathlib import Path
-
-
-          # --------------------------------------------------------
-          # READ CSV
-          # --------------------------------------------------------
 
           raw = Path(
               "/tmp/uk-vrps.csv"
@@ -609,18 +406,13 @@ jobs:
               errors="replace"
           )
 
-
           try:
-
               dialect = csv.Sniffer().sniff(
                   raw[:8192],
                   delimiters=",;\t"
               )
-
           except csv.Error:
-
               dialect = csv.excel
-
 
           rows = list(
               csv.DictReader(
@@ -629,103 +421,50 @@ jobs:
               )
           )
 
-
-          print(
-              f"CSV records: {len(rows)}"
-          )
-
+          print(f"CSV records: {len(rows)}")
 
           if not rows:
-
               raise SystemExit(
-                  "NATS VRP CSV contains no records."
+                  "ERROR: NATS VRP CSV contains zero records."
               )
 
-
-          fields = list(
-              rows[0].keys()
-          )
-
+          fields = list(rows[0].keys())
 
           print("")
           print("CSV fields:")
-
-
           for field in fields:
-
-              print(
-                  f"  {field}"
-              )
-
-
-          # --------------------------------------------------------
-          # SHOW RAW RECORDS FOR DIAGNOSTICS
-          # --------------------------------------------------------
-
-          print("")
-          print("FIRST 5 RAW VRP RECORDS:")
-
-          for row in rows[:5]:
-
-              print(row)
-
-          print("")
-
-
-          # --------------------------------------------------------
-          # NORMALISE FIELD NAMES
-          # --------------------------------------------------------
+              print(f"  {field}")
 
           def norm(value):
-
               return re.sub(
                   r"[^a-z0-9]",
                   "",
                   str(value).strip().lower()
               )
 
-
           normalised = {
-
               norm(field): field
-
               for field in fields
-
               if field
-
           }
 
-
           def find_field(*names):
-
               for name in names:
-
                   key = norm(name)
 
                   if key in normalised:
-
                       return normalised[key]
 
-
               for key, original in normalised.items():
-
                   for name in names:
-
                       n = norm(name)
 
-                      if (
-                          n in key
-                          or key in n
-                      ):
-
+                      if n in key or key in n:
                           return original
-
 
               return None
 
-
           name_field = find_field(
-
               "VRP Name",
               "VRP",
               "Name",
@@ -733,113 +472,55 @@ jobs:
               "Identifier",
               "Point Name",
               "Point"
-
           )
 
-
           lat_field = find_field(
-
               "Latitude",
               "Lat",
               "Latitude DD",
               "Latitude Decimal"
-
           )
 
-
           lon_field = find_field(
-
               "Longitude",
               "Lon",
               "Long",
               "Longitude DD",
               "Longitude Decimal"
-
-          )
-
-
-          print("Detected fields:")
-
-          print(
-              "  Name:",
-              name_field
-          )
-
-          print(
-              "  Latitude:",
-              lat_field
-          )
-
-          print(
-              "  Longitude:",
-              lon_field
           )
 
           print("")
-
+          print("Detected fields:")
+          print(f"  Name:      {name_field}")
+          print(f"  Latitude:  {lat_field}")
+          print(f"  Longitude: {lon_field}")
 
           if not lat_field or not lon_field:
-
               raise SystemExit(
-
-                  "Could not identify "
-                  "latitude/longitude fields."
-
+                  "ERROR: Could not identify NATS latitude/longitude fields."
               )
-
-
-          # --------------------------------------------------------
-          # COORDINATE PARSER
-          #
-          # NATS uses compact:
-          #
-          # Latitude:
-          #   DDMMSS
-          #
-          # Longitude:
-          #   DDDMMSS
-          #
-          # Hemisphere letters may be present.
-          #
-          # We also support ordinary decimal degrees and
-          # conventional DMS formats.
-          # --------------------------------------------------------
 
           def parse_coord(value, latitude):
+              """
+              NATS VRP coordinates use:
+                Latitude  DDMMSS[.decimal]
+                Longitude DDDMMSS[.decimal]
+
+              The parser also accepts conventional decimal degrees
+              and DMS values with N/S/E/W.
+              """
 
               if value is None:
-
                   return None
 
-
-              text = str(
-                  value
-              ).strip()
-
+              text = str(value).strip()
 
               if not text:
-
                   return None
 
-
-              text = text.replace(
-                  ",",
-                  "."
-              )
-
-
-              # ------------------------------------------------
-              # Extract hemisphere.
-              #
-              # Handles:
-              #
-              # 512345N
-              # 0012345W
-              # 51 23 45 N
-              # ------------------------------------------------
+              text = text.replace(",", ".")
 
               hemisphere = None
-
 
               match = re.search(
                   r"([NSEW])\s*$",
@@ -847,117 +528,46 @@ jobs:
                   flags=re.I
               )
 
-
               if match:
+                  hemisphere = match.group(1).upper()
+                  text = text[:match.start()].strip()
 
-                  hemisphere = (
-                      match.group(1)
-                      .upper()
-                  )
-
-                  text = text[
-                      :match.start()
-                  ].strip()
-
-
-              # ------------------------------------------------
-              # Try ordinary decimal degrees first.
-              #
-              # Only accept values already inside the normal
-              # geographic range.
-              # ------------------------------------------------
+              # ----------------------------------------------
+              # Ordinary decimal degrees
+              # ----------------------------------------------
 
               try:
+                  number = float(text)
 
-                  number = float(
-                      text
-                  )
+                  limit = 90 if latitude else 180
 
-
-                  limit = (
-                      90
-                      if latitude
-                      else 180
-                  )
-
-
-                  if (
-                      -limit
-                      <= number
-                      <= limit
-                  ):
-
-                      if hemisphere in (
-                          "S",
-                          "W"
-                      ):
-
-                          number = -abs(
-                              number
-                          )
-
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
-
-                          number = abs(
-                              number
-                          )
+                  if -limit <= number <= limit:
+                      if hemisphere in ("S", "W"):
+                          number = -abs(number)
+                      elif hemisphere in ("N", "E"):
+                          number = abs(number)
 
                       return number
 
               except ValueError:
-
                   pass
 
-
-              # ------------------------------------------------
+              # ----------------------------------------------
               # Remove DMS separators.
-              # ------------------------------------------------
+              # ----------------------------------------------
 
               compact = (
-
                   text
-
-                  .replace(
-                      "°",
-                      ""
-                  )
-
-                  .replace(
-                      "'",
-                      ""
-                  )
-
-                  .replace(
-                      '"',
-                      ""
-                  )
-
-                  .replace(
-                      " ",
-                      ""
-                  )
-
+                  .replace("°", "")
+                  .replace("'", "")
+                  .replace('"', "")
+                  .replace(" ", "")
                   .strip()
-
               )
 
-
-              # ------------------------------------------------
-              # Compact NATS DDMMSS / DDDMMSS.
-              #
-              # Decimal seconds are supported.
-              #
-              # Examples:
-              #
-              # 513012
-              # 513012.5
-              #
-              # 0003045
-              # 0003045.5
-              # ------------------------------------------------
+              # ----------------------------------------------
+              # NATS compact DDMMSS / DDDMMSS.
+              # ----------------------------------------------
 
               if re.fullmatch(
                   r"\d+(?:\.\d+)?",
@@ -965,32 +575,18 @@ jobs:
               ):
 
                   try:
-
                       if "." in compact:
-
-                          integer_part, decimal_part = (
-                              compact.split(
-                                  ".",
-                                  1
-                              )
+                          integer_part, decimal_part = compact.split(
+                              ".",
+                              1
                           )
-
                       else:
-
                           integer_part = compact
                           decimal_part = ""
 
-
                       if latitude:
-
-                          # DDMMSS
-
-                          if len(
-                              integer_part
-                          ) < 6:
-
+                          if len(integer_part) < 6:
                               raise ValueError
-
 
                           degrees = int(
                               integer_part[:2]
@@ -1005,15 +601,8 @@ jobs:
                           )
 
                       else:
-
-                          # DDDMMSS
-
-                          if len(
-                              integer_part
-                          ) < 7:
-
+                          if len(integer_part) < 7:
                               raise ValueError
-
 
                           degrees = int(
                               integer_part[:3]
@@ -1027,567 +616,318 @@ jobs:
                               integer_part[5:]
                           )
 
-
                       if decimal_part:
-
                           seconds_text += (
-                              "."
-                              + decimal_part
+                              "." + decimal_part
                           )
-
 
                       seconds = float(
                           seconds_text
                       )
 
+                      limit = 90 if latitude else 180
 
-                      limit = (
-                          90
-                          if latitude
-                          else 180
-                      )
-
-
-                      if (
-                          degrees > limit
-                          or minutes >= 60
-                          or seconds >= 60
-                      ):
-
+                      if degrees > limit:
                           raise ValueError
 
+                      if minutes >= 60:
+                          raise ValueError
+
+                      if seconds >= 60:
+                          raise ValueError
 
                       result = (
-
                           degrees
-
                           + minutes / 60
-
                           + seconds / 3600
-
                       )
 
+                      if hemisphere in ("S", "W"):
+                          result = -abs(result)
 
-                      # Apply explicit hemisphere.
-
-                      if hemisphere in (
-                          "S",
-                          "W"
-                      ):
-
-                          result = -abs(
-                              result
-                          )
-
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
-
-                          result = abs(
-                              result
-                          )
-
-
-                      # If there is no hemisphere, preserve the
-                      # numeric sign rather than guessing.
+                      elif hemisphere in ("N", "E"):
+                          result = abs(result)
 
                       return result
-
 
                   except (
                       ValueError,
                       IndexError
                   ):
-
                       pass
 
-
-              # ------------------------------------------------
-              # Conventional DMS / DDM fallback.
-              # ------------------------------------------------
+              # ----------------------------------------------
+              # Conventional DMS fallback.
+              # ----------------------------------------------
 
               try:
-
                   numbers = re.findall(
-
                       r"[-+]?\d+(?:\.\d+)?",
-
                       text
-
                   )
-
 
                   if not numbers:
-
                       return None
-
 
                   values = [
-
                       float(number)
-
                       for number in numbers
-
                   ]
 
-
-                  degrees = abs(
-                      values[0]
-                  )
-
+                  degrees = abs(values[0])
 
                   minutes = (
-
                       abs(values[1])
-
                       if len(values) > 1
-
                       else 0
-
                   )
-
 
                   seconds = (
-
                       abs(values[2])
-
                       if len(values) > 2
-
                       else 0
-
                   )
 
-
-                  if (
-                      minutes >= 60
-                      or seconds >= 60
-                  ):
-
+                  if minutes >= 60 or seconds >= 60:
                       return None
-
 
                   result = (
-
                       degrees
-
                       + minutes / 60
-
                       + seconds / 3600
-
                   )
 
+                  if hemisphere in ("S", "W"):
+                      result = -abs(result)
 
-                  if hemisphere in (
-                      "S",
-                      "W"
-                  ):
-
-                      result = -result
-
-                  elif hemisphere in (
-                      "N",
-                      "E"
-                  ):
-
-                      result = abs(
-                          result
-                      )
+                  elif hemisphere in ("N", "E"):
+                      result = abs(result)
 
                   elif values[0] < 0:
-
                       result = -result
 
+                  limit = 90 if latitude else 180
 
-                  limit = (
-                      90
-                      if latitude
-                      else 180
-                  )
-
-
-                  if not (
-                      -limit
-                      <= result
-                      <= limit
-                  ):
-
+                  if not -limit <= result <= limit:
                       return None
 
-
                   return result
-
 
               except (
                   ValueError,
                   IndexError
               ):
-
                   return None
 
-
-          # --------------------------------------------------------
-          # CONVERT RECORDS
-          # --------------------------------------------------------
-
           features = []
-
           invalid_coordinates = 0
 
-
-          for index, row in enumerate(
-              rows,
-              1
-          ):
+          for index, row in enumerate(rows, 1):
 
               latitude = parse_coord(
-
-                  row.get(
-                      lat_field
-                  ),
-
+                  row.get(lat_field),
                   True
-
               )
-
 
               longitude = parse_coord(
-
-                  row.get(
-                      lon_field
-                  ),
-
+                  row.get(lon_field),
                   False
-
               )
 
-
-              if (
-                  latitude is None
-                  or longitude is None
-              ):
-
+              if latitude is None or longitude is None:
                   invalid_coordinates += 1
-
                   continue
 
-
-              # Validate geographic ranges.
-
-              if not (
-                  -90
-                  <= latitude
-                  <= 90
-              ):
-
+              if not -90 <= latitude <= 90:
                   invalid_coordinates += 1
-
                   continue
 
-
-              if not (
-                  -180
-                  <= longitude
-                  <= 180
-              ):
-
+              if not -180 <= longitude <= 180:
                   invalid_coordinates += 1
-
                   continue
 
+              name = ""
 
               if name_field:
-
                   name = str(
-
-                      row.get(
-                          name_field,
-                          ""
-                      )
-
+                      row.get(name_field, "")
                   ).strip()
 
-              else:
-
-                  name = ""
-
-
               if not name:
-
-                  name = (
-                      f"VRP {index}"
-                  )
-
+                  name = f"VRP {index}"
 
               properties = {
-
                   str(k).strip(): v
-
                   for k, v in row.items()
-
                   if k
-
               }
 
-
               properties["name"] = name
-
               properties["ident"] = name
 
-
               features.append({
-
-                  "type":
-                      "Feature",
-
-                  "properties":
-                      properties,
-
+                  "type": "Feature",
+                  "properties": properties,
                   "geometry": {
-
-                      "type":
-                          "Point",
-
+                      "type": "Point",
                       "coordinates": [
-
                           longitude,
-
                           latitude
-
                       ]
-
                   }
-
               })
 
-
-          # --------------------------------------------------------
-          # RESULT
-          # --------------------------------------------------------
-
+          print("")
+          print("==========================================")
+          print("VRP CONVERSION RESULT")
+          print("==========================================")
+          print("")
+          print(f"CSV records:          {len(rows)}")
+          print(f"Valid VRPs:           {len(features)}")
+          print(f"Invalid coordinates:  {invalid_coordinates}")
           print("")
 
-          print(
-              "=========================================="
-          )
-
-          print(
-              "VRP CONVERSION RESULT"
-          )
-
-          print(
-              "=========================================="
-          )
-
-          print("")
-
-          print(
-              "CSV records:",
-              len(rows)
-          )
-
-          print(
-              "Valid VRPs:",
-              len(features)
-          )
-
-          print(
-              "Invalid coordinates:",
-              invalid_coordinates
-          )
-
-          print("")
-
-
-          if not features:
-
+          # HARD SAFETY CHECK:
+          # Never write an empty VRP dataset.
+          if len(features) == 0:
               raise SystemExit(
-
-                  "VRP conversion produced "
-                  "zero valid points."
-
+                  "ERROR: VRP conversion produced ZERO valid features. "
+                  "The existing repository data will NOT be replaced."
               )
 
-
-          # --------------------------------------------------------
-          # WRITE GEOJSON
-          # --------------------------------------------------------
-
           output = {
-
-              "type":
-                  "FeatureCollection",
-
-              "features":
-                  features
-
+              "type": "FeatureCollection",
+              "features": features
           }
 
-
           Path(
-
-              "data/uk-reporting-points.geojson"
-
+              "/tmp/avimap-data/uk-reporting-points.geojson"
           ).write_text(
-
               json.dumps(
                   output,
-                  separators=(
-                      ",",
-                      ":"
-                  )
+                  separators=(",", ":")
               ),
-
               encoding="utf-8"
-
           )
-
 
           print(
-              "Created:",
-              "data/uk-reporting-points.geojson"
+              f"Created {len(features)} UK VRP features."
           )
-
-          print("")
-
           PY
 
 
       # ============================================================
-      # VALIDATE GENERATED DATA
+      # VALIDATE BOTH DATASETS BEFORE TOUCHING REPOSITORY FILES
       # ============================================================
 
-      - name: Validate generated data
+      - name: Validate generated aviation data
         run: |
-          set -e
+          set -euo pipefail
 
           AIRSPACE_COUNT=$(
-            jq \
-              '.features | length' \
-              data/uk-airspace.geojson
+            jq '.features | length' \
+            /tmp/avimap-data/uk-airspace.geojson
           )
-
 
           VRP_COUNT=$(
-            jq \
-              '.features | length' \
-              data/uk-reporting-points.geojson
+            jq '.features | length' \
+            /tmp/avimap-data/uk-reporting-points.geojson
           )
 
-
           echo ""
-
           echo "=========================================="
-
-          echo "FINAL DATA COUNTS"
-
+          echo "FINAL GENERATED DATA COUNTS"
           echo "=========================================="
-
+          echo ""
+          echo "Airspaces : ${AIRSPACE_COUNT}"
+          echo "VRPs      : ${VRP_COUNT}"
           echo ""
 
-          echo "Airspaces : $AIRSPACE_COUNT"
-
-          echo "VRPs      : $VRP_COUNT"
-
-          echo ""
-
-
-          if [ "$AIRSPACE_COUNT" -eq 0 ]; then
-
-            echo "ERROR: zero airspaces."
-
+          if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
+            echo "ERROR: Generated airspace dataset is empty."
             exit 1
-
           fi
 
-
-          if [ "$VRP_COUNT" -eq 0 ]; then
-
-            echo "ERROR: zero VRPs."
-
+          if [ "${VRP_COUNT}" -eq 0 ]; then
+            echo "ERROR: Generated VRP dataset is empty."
             exit 1
-
           fi
+
+          echo "Validation successful."
+          echo "Repository data has not been changed yet."
 
 
       # ============================================================
-      # COMMIT CHANGES
+      # ONLY AFTER VALIDATION, REPLACE REPOSITORY DATA
+      # ============================================================
+
+      - name: Install validated aviation data
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+
+          cp \
+            /tmp/avimap-data/uk-airspace.geojson \
+            data/uk-airspace.geojson
+
+          cp \
+            /tmp/avimap-data/uk-reporting-points.geojson \
+            data/uk-reporting-points.geojson
+
+          echo ""
+          echo "Validated aviation data copied into repository."
+
+
+      # ============================================================
+      # COMMIT ONLY IF DATA ACTUALLY CHANGED
       # ============================================================
 
       - name: Commit updated aviation data
         run: |
-          set -e
+          set -euo pipefail
 
           git config \
             user.name \
             "AviMap Data Bot"
 
-
           git config \
             user.email \
             "actions@users.noreply.github.com"
-
-
-          echo ""
-
-          echo "=========================================="
-
-          echo "CHECKING FOR DATA CHANGES"
-
-          echo "=========================================="
-
-
-          git status --short
-
 
           git add \
             data/uk-airspace.geojson \
             data/uk-reporting-points.geojson
 
+          echo ""
+          echo "=========================================="
+          echo "DATA CHANGE CHECK"
+          echo "=========================================="
+          echo ""
 
           if git diff --cached --quiet; then
 
-            echo ""
-
-            echo "=========================================="
-
-            echo "NO DATA CHANGES DETECTED"
-
-            echo "=========================================="
-
-            echo ""
-
-            echo "The downloaded datasets are identical"
-
-            echo "to the versions already in Git."
-
-            echo ""
+            echo "No changes detected."
+            echo "Existing aviation data remains untouched."
 
           else
 
+            echo "Changes detected:"
             echo ""
-
-            echo "=========================================="
-
-            echo "DATA CHANGES DETECTED"
-
-            echo "=========================================="
-
-            echo ""
-
 
             git diff --cached --stat
 
+            echo ""
+            echo "Committing updated aviation data..."
 
             git commit \
               -m "Update UK aviation data"
 
-
             git push
 
-
             echo ""
-
-            echo "Aviation data committed successfully."
+            echo "=========================================="
+            echo "UPDATE COMPLETE"
+            echo "=========================================="
 
           fi
