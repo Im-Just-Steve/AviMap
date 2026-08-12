@@ -16,41 +16,76 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check OpenAIP export
+        run: |
+          set -e
+
+          echo "Checking OpenAIP UK airspace export..."
+
+          curl -I -L --retry 3 \
+            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.geojson" \
+            || true
+
       - name: Download UK airspace
         run: |
+          set -e
+
           mkdir -p data
 
-          curl -fL --retry 3 \
-            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.geojson" \
-            -o data/uk-airspace.geojson
+          curl -L --retry 3 --fail \
+            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.json" \
+            -o data/uk-airspace.json
 
-          node - <<'NODE'
+          echo "Downloaded file:"
+          ls -lh data/uk-airspace.json
+
+          echo "First 500 characters:"
+          head -c 500 data/uk-airspace.json
+          echo
+
+      - name: Validate airspace data
+        run: |
+          node <<'NODE'
           const fs = require("fs");
 
-          const file = "data/uk-airspace.geojson";
+          const file = "data/uk-airspace.json";
           const data = JSON.parse(fs.readFileSync(file, "utf8"));
 
-          if (
-            !data ||
-            data.type !== "FeatureCollection" ||
-            !Array.isArray(data.features) ||
-            data.features.length === 0
-          ) {
-            throw new Error("Airspace file contains zero features");
+          console.log("Top-level type:", data?.type);
+          console.log("Top-level keys:", Object.keys(data || {}));
+
+          let count = 0;
+
+          if (data?.type === "FeatureCollection") {
+            count = Array.isArray(data.features) ? data.features.length : 0;
+          } else if (Array.isArray(data)) {
+            count = data.length;
+          } else if (Array.isArray(data?.items)) {
+            count = data.items.length;
+          } else if (Array.isArray(data?.data)) {
+            count = data.data.length;
+          } else if (Array.isArray(data?.airspaces)) {
+            count = data.airspaces.length;
           }
 
-          console.log(`Downloaded ${data.features.length} airspace features`);
+          console.log("Detected airspace records:", count);
+
+          if (count === 0) {
+            throw new Error(
+              "The downloaded file contains no recognised airspace records."
+            );
+          }
           NODE
 
-      - name: Commit updated airspace
+      - name: Commit updated data
         run: |
           git config user.name "AviMap Data Bot"
           git config user.email "actions@users.noreply.github.com"
 
-          git add data/uk-airspace.geojson
+          git add data/uk-airspace.json
 
           if git diff --cached --quiet; then
-            echo "No airspace data changes."
+            echo "No data changes."
           else
             git commit -m "Update UK airspace data"
             git push
