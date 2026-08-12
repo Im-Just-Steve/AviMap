@@ -1,5 +1,5 @@
 import * as maplibregl from "https://cdn.jsdelivr.net/npm/maplibre-gl@6.0.0/+esm";
-import { DEFAULT_CENTER, DEFAULT_ZOOM } from "./data.js";
+import { DEFAULT_CENTER, DEFAULT_ZOOM, AIRCRAFT_CENTRE_ZOOM } from "./data.js";
 import { haversineNm, bearingDegrees, formatNm } from "./geo.js";
 
 let map;
@@ -149,7 +149,7 @@ function addReportingPoints() {
         9, 4,
         13, 5
       ],
-      "circle-color": "#d400a5",
+      "circle-color": "#8b2c83",
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 1.5
     }
@@ -174,7 +174,7 @@ function addReportingPoints() {
       "text-allow-overlap": false
     },
     paint: {
-      "text-color": "#6c397e",
+      "text-color": "#8b2c83",
       "text-halo-color": "#fff",
       "text-halo-width": 1.2
     }
@@ -729,7 +729,7 @@ export function clearAircraftTrail() {
 
 export function centerOn(position) {
   if (!map || !position) return;
-  map.easeTo({ center: [position.lon, position.lat], zoom: Math.max(map.getZoom(), 8), duration: 350 });
+  map.easeTo({ center: [position.lon, position.lat], zoom: AIRCRAFT_CENTRE_ZOOM, duration: 450, essential: true });
 }
 
 export function zoom(delta) {

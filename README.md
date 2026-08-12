@@ -365,13 +365,9 @@ Fixed the OpenFreeMap glyph requests caused by the style's
 the Open Sans glyph set without the invalid comma/space font-stack segment.
 
 
-## v1.2.3 UK VRP source
+## v1.2.4
 
-UK VRPs are now sourced from the official NATS AIS Visual Reference Points
-List dataset. NATS states that this is the consolidated UK VRP list and that
-a CSV is provided for automated processes. The GitHub Action discovers the
-current CSV automatically, so the AIRAC date does not need to be hard-coded.
-
-If the committed VRP GeoJSON is still empty, run `Update UK aviation data`
-once. The PWA now handles an empty first-run file without throwing an
-application error.
+- VRP markers and labels use the same purple as ATZ airspace (`#8b2c83`).
+- Aircraft automatically centres at zoom 8.5 when the first valid telemetry is received.
+- Manual panning and zooming are preserved during subsequent telemetry updates.
+- The Centre button returns to the aircraft and resets to zoom 8.5.

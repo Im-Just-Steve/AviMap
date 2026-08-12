@@ -1,6 +1,6 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.4",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Switched UK VRP acquisition to the official NATS AIS Visual Reference Points List dataset. The GitHub Action discovers the current NATS CSV, downloads it, converts it to local GeoJSON, and validates the result. An empty first-run VRP file is handled gracefully by the PWA."
+  "releaseNotes": "VRPs now use the same purple as ATZs. Aircraft centring now uses a fixed 8.5 zoom: the map centres automatically when aircraft telemetry is first received, manual pan/zoom is preserved, and the Centre button returns to the aircraft at the default zoom."
 }
