@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Added UK VRP/reporting-point data. GitHub Actions now downloads the OpenAIP UK reporting-point export, the PWA loads it locally, and VRPs are displayed and selectable on the map."
+  "releaseNotes": "Fixed UK VRP acquisition by using the OpenAIP reporting-points API in GitHub Actions, converting API records to local GeoJSON, and rendering VRPs with a native MapLibre circle layer. Also fixed early telemetry arriving before the MapLibre style has loaded."
 }

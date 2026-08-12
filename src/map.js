@@ -5,6 +5,7 @@ import { haversineNm, bearingDegrees, formatNm } from "./geo.js";
 let map;
 let aircraftTrail = [];
 let aircraftTrailSourceAdded = false;
+let aircraftTrailPending = false;
 const AIRCRAFT_TRAIL_COLOR = "#2A9D8F";
 
 let aircraftMarker;
@@ -63,6 +64,11 @@ export function createMap({ data, onSelect, onReady }) {
     map.on("mouseenter", "avimap-airspace-fill", () => map.getCanvas().style.cursor = "pointer");
     map.on("mouseleave", "avimap-airspace-fill", () => map.getCanvas().style.cursor = "");
     onMapReady?.();
+
+    if (aircraftTrailPending && aircraftTrail.length) {
+      aircraftTrailPending = false;
+      renderAircraftTrail();
+    }
   });
 }
 
@@ -129,21 +135,23 @@ function addReportingPoints() {
 
   map.addSource("avimap-vrp-source", { type: "geojson", data: sourceData });
 
-  // UK VFR-style reporting point marker: a small magenta diamond.
+  // Use a native circle layer so VRPs do not depend on a particular
+  // basemap sprite sheet containing a named icon.
   map.addLayer({
     id: "avimap-vrps",
-    type: "symbol",
+    type: "circle",
     source: "avimap-vrp-source",
     minzoom: 6,
-    layout: {
-      "icon-image": "circle-11",
-      "icon-size": 0.72,
-      "icon-allow-overlap": true
-    },
     paint: {
-      "icon-color": "#d400a5",
-      "icon-halo-color": "#ffffff",
-      "icon-halo-width": 1.2
+      "circle-radius": [
+        "interpolate", ["linear"], ["zoom"],
+        6, 3,
+        9, 4,
+        13, 5
+      ],
+      "circle-color": "#d400a5",
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 1.5
     }
   });
 
@@ -463,7 +471,7 @@ function normaliseGeoJson(input) {
 
 
 export function updateAviationData(data) {
-  if (!map || !data) return;
+  if (!map || !data || !map.loaded()) return;
   dataState = data;
 
   const airportFeatures = (data.airports || []).map(a => ({
@@ -643,10 +651,24 @@ function updateAircraftTrail(lon, lat) {
 
   aircraftTrail.push(point);
 
-  // Keep the trail bounded for long development/test sessions.
-  // This is approximately 50,000 points, far more than a normal flight needs.
   if (aircraftTrail.length > 50000) {
     aircraftTrail.splice(0, aircraftTrail.length - 50000);
+  }
+
+  // Telemetry can arrive before the MapLibre style has finished loading.
+  // Keep the points and render them once the map's load event has fired.
+  if (!map.loaded()) {
+    aircraftTrailPending = true;
+    return;
+  }
+
+  renderAircraftTrail();
+}
+
+function renderAircraftTrail() {
+  if (!map || !map.loaded()) {
+    aircraftTrailPending = true;
+    return;
   }
 
   const feature = {
@@ -661,6 +683,7 @@ function updateAircraftTrail(lon, lat) {
   const source = map.getSource("aircraft-trail");
   if (source) {
     source.setData(feature);
+    aircraftTrailSourceAdded = true;
     return;
   }
 
@@ -669,9 +692,6 @@ function updateAircraftTrail(lon, lat) {
     data: feature
   });
 
-  // Add the trail beneath the aircraft marker and above the base map.
-  // If the existing route/airspace layers have not loaded yet, the layer is
-  // still valid and MapLibre will render it as soon as the style is ready.
   map.addLayer({
     id: "aircraft-trail",
     type: "line",

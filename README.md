@@ -343,3 +343,16 @@ UK visual reporting points / reporting points are now downloaded by the
 GitHub Actions aviation-data workflow from OpenAIP and committed as
 `data/uk-reporting-points.geojson`. The PWA loads the local file and displays
 VRPs from zoom level 6, with selectable labels.
+
+
+## v1.2.1 VRP and telemetry fixes
+
+The UK VRP workflow now uses the OpenAIP reporting-points REST API with the
+existing `OPENAIP_API_KEY` GitHub secret, rather than relying on the GB daily
+GCS `rpp` GeoJSON export. The workflow converts the returned records to a
+local GeoJSON file and fails if no UK reporting points are produced.
+
+VRPs are rendered using a native MapLibre circle layer, avoiding dependency on
+a basemap sprite icon. Aircraft telemetry received before the MapLibre style
+has loaded is queued so it no longer produces `Style is not done loading`
+errors.
