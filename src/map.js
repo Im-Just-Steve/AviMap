@@ -328,9 +328,7 @@ function addAirspace() {
 
 function classifyAirspaceStyle(properties = {}) {
   /*
-   * AviMap UK airspace styling.
-   *
-   * Canonical NATS/AviMap categories:
+   * Canonical AviMap airspace categories:
    *   A-G   -> existing class colours
    *   PA    -> Prohibited (red)
    *   RA    -> Restricted (red)
@@ -339,58 +337,98 @@ function classifyAirspaceStyle(properties = {}) {
    *   MATZ  -> blue / dashed
    *   RMZ   -> blue / dashed
    *   TMZ   -> ATZ colour / dashed
+   *
+   * category is authoritative when present. The fallbacks are deliberately
+   * defensive so older/generated NATS GeoJSON still renders correctly.
    */
 
-  const category = String(
-    properties.category || ""
-  ).trim().toUpperCase();
+  const category = String(properties.category || "").trim().toUpperCase();
 
+  const classifyText = [
+    properties.category,
+    properties.aixmType,
+    properties.airspaceType,
+    properties.type,
+    properties.localType,
+    properties.icaoClass,
+    properties.classification,
+    properties.name,
+    properties.designator
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ");
+
+  // Canonical categories first.
   if (category === "PA" || category === "RA" || category === "DA") {
-    return {
-      color: "red",
-      dash: false,
-      category
-    };
+    return { color: "red", dash: false, category };
   }
 
   if (category === "ATZ" || category === "TMZ") {
-    return {
-      color: "purple",
-      dash: true,
-      category
-    };
+    return { color: "purple", dash: true, category };
   }
 
   if (category === "MATZ" || category === "RMZ") {
-    return {
-      color: "blue",
-      dash: true,
-      category
-    };
+    return { color: "blue", dash: true, category };
   }
 
-  if (category === "A") {
-    return {
-      color: "purple",
-      dash: false,
-      category: "A"
-    };
+  if (["A", "B", "C", "D", "E", "F", "G"].includes(category)) {
+    if (category === "A") return { color: "purple", dash: false, category };
+    if (["B", "C", "D", "E"].includes(category)) {
+      return { color: "blue", dash: false, category };
+    }
+    return { color: "grey", dash: false, category };
   }
 
-  if (["B", "C", "D", "E"].includes(category)) {
-    return {
-      color: "blue",
-      dash: false,
-      category
-    };
+  // Defensive fallback for NATS/AIXM variants.
+  if (/\b(MILITARY\s+AERODROME\s+TRAFFIC\s+ZONE|MILITARY\s+ATZ|MATZ)\b/.test(classifyText)) {
+    return { color: "blue", dash: true, category: "MATZ" };
   }
 
-  if (["F", "G"].includes(category)) {
-    return {
-      color: "grey",
-      dash: false,
-      category
-    };
+  if (/\b(RADIO\s+(COMMUNICATION\s+)?MANDATORY\s+ZONE|RMZ)\b/.test(classifyText)) {
+    return { color: "blue", dash: true, category: "RMZ" };
+  }
+
+  if (/\b(TRANSPONDER\s+MANDATORY\s+ZONE|TMZ)\b/.test(classifyText)) {
+    return { color: "purple", dash: true, category: "TMZ" };
+  }
+
+  if (/\b(AERODROME\s+TRAFFIC\s+ZONE|ATZ)\b/.test(classifyText)) {
+    return { color: "purple", dash: true, category: "ATZ" };
+  }
+
+  if (/\b(PROHIBITED|PROHIBITED\s+AREA|PA)\b/.test(classifyText)) {
+    return { color: "red", dash: false, category: "PA" };
+  }
+
+  if (/\b(RESTRICTED|RESTRICTED\s+AREA|RA)\b/.test(classifyText)) {
+    return { color: "red", dash: false, category: "RA" };
+  }
+
+  if (/\b(DANGER|DANGER\s+AREA|DA)\b/.test(classifyText)) {
+    return { color: "red", dash: false, category: "DA" };
+  }
+
+  // Never infer Class D from a generic "D" buried in text. Only accept
+  // explicit class fields for A-G.
+  const explicitClass = String(
+    properties.icaoClass ??
+    properties.classification ??
+    properties.class ??
+    ""
+  ).trim().toUpperCase().replace(/^CLASS\s+/, "");
+
+  if (["A", "B", "C", "D", "E", "F", "G"].includes(explicitClass)) {
+    if (explicitClass === "A") {
+      return { color: "purple", dash: false, category: "A" };
+    }
+
+    if (["B", "C", "D", "E"].includes(explicitClass)) {
+      return { color: "blue", dash: false, category: explicitClass };
+    }
+
+    return { color: "grey", dash: false, category: explicitClass };
   }
 
   return {
