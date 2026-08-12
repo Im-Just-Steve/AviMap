@@ -126,3 +126,5 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
     font-size: 10px;
   }
 }
+
+.legend-grey { background: #66706f; }

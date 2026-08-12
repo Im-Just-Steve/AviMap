@@ -255,3 +255,24 @@ Requested presentation:
 - ATZ: magenta
 - TMZ: magenta with dashed boundary
 - MATZ / RMZ / controlled airspace: blue
+
+
+## v1.0.12 explicit airspace styling
+
+The requested styling is now the authoritative AviMap specification:
+
+| Airspace | Colour | Boundary |
+| --- | --- | --- |
+| Class A | Purple | Solid |
+| Prohibited / Restricted / Danger | Red | Solid |
+| ATZ | Purple | Dashed |
+| TMZ | Purple | Dashed |
+| Controlled airspace | Blue | Solid |
+| MATZ | Blue | Dashed |
+| RMZ | Blue | Dashed |
+| Other / Class G | Grey | Solid |
+
+The renderer preserves the original OpenAIP `type` and `icaoClass` values and
+adds explicit `avimapColor`, `avimapDashed` and `avimapCategory` properties.
+P/R/D and the named special zones are evaluated before generic ICAO class
+classification.

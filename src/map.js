@@ -166,8 +166,8 @@ function addAirspace() {
 
   const colorExpression = [
     "match", ["get", "avimapColor"],
+    "red", "#c62828",
     "purple", "#8b2c83",
-    "magenta", "#b0188a",
     "blue", "#1769aa",
     "grey", "#66706f",
     "#66706f"
@@ -181,8 +181,8 @@ function addAirspace() {
       "fill-color": colorExpression,
       "fill-opacity": [
         "match", ["get", "avimapColor"],
+        "red", 0.08,
         "purple", 0.08,
-        "magenta", 0.10,
         "blue", 0.07,
         "grey", 0.035,
         0.04
@@ -198,19 +198,17 @@ function addAirspace() {
       "line-color": colorExpression,
       "line-width": [
         "match", ["get", "avimapColor"],
-        "purple", 2.1,
-        "magenta", 1.9,
+        "red", 2.0,
+        "purple", 1.9,
         "blue", 1.7,
         "grey", 1.1,
         1.2
       ],
       "line-opacity": 0.95,
       "line-dasharray": [
-        "match", ["get", "airspaceType"],
-        "ATZ", ["literal", [2, 2]],
-        "MATZ", ["literal", [2, 2]],
-        "RMZ", ["literal", [3, 2]],
-        "TMZ", ["literal", [3, 2]],
+        "case",
+        ["get", "avimapDashed"],
+        ["literal", [2.5, 2.5]],
         ["literal", [1, 0]]
       ]
     }
@@ -234,7 +232,24 @@ function addAirspace() {
   });
 }
 
-function classifyAirspaceColor(properties = {}) {
+function classifyAirspaceStyle(properties = {}) {
+  /*
+   * AviMap airspace styling specification:
+   *
+   * Class A                         -> purple / solid
+   * Prohibited / Restricted / Danger -> red / solid
+   * ATZ                            -> purple / dashed
+   * TMZ                            -> purple / dashed
+   * Controlled airspace            -> blue / solid
+   * MATZ                           -> blue / dashed
+   * RMZ                            -> blue / dashed
+   * Other / Class G                -> grey / solid
+   *
+   * IMPORTANT:
+   * Classification uses the actual OpenAIP numeric fields. We do not infer
+   * airspace type from its name/designator.
+   */
+
   const type = Number(properties.type);
   const icaoClass = Number(
     properties.icaoClass ??
@@ -242,136 +257,137 @@ function classifyAirspaceColor(properties = {}) {
     properties.class
   );
 
-  // OpenAIP airspace type enum:
-  // 1 Restricted, 2 Danger, 3 Prohibited,
-  // 4 CTR, 5 TMZ, 6 RMZ, 7 TMA,
-  // 13 ATZ, 14 MATZ, 15 Airway, 26 CTA.
-  //
-  // OpenAIP ICAO class enum:
-  // 0 A, 1 B, 2 C, 3 D, 4 E, 5 F, 6 G, 8 SUA/unclassified.
-  //
-  // UK VFR-inspired presentation:
-  // - Class A / A-type controlled airspace: magenta
-  // - C/D/E controlled airspace: blue
-  // - ATZ/MATZ: blue
-  // - P/R/D: purple
-  // - TMZ/RMZ: blue
-  // - unclassified/other: muted grey
+  // OpenAIP type values used by the current data pipeline.
+  const TYPE_RESTRICTED = 1;
+  const TYPE_DANGER = 2;
+  const TYPE_PROHIBITED = 3;
+  const TYPE_CTR = 4;
+  const TYPE_TMZ = 5;
+  const TYPE_RMZ = 6;
+  const TYPE_TMA = 7;
+  const TYPE_ATZ = 13;
+  const TYPE_MATZ = 14;
+  const TYPE_AIRWAY = 15;
+  const TYPE_CTA = 26;
 
-  if (type === 1 || type === 2 || type === 3) {
-    return "purple";
-  }
+  // OpenAIP ICAO class values.
+  const ICAO_CLASS_A = 0;
+  const ICAO_CLASSES_CONTROLLED = new Set([1, 2, 3, 4, 5]);
 
-  if (type === 13 || type === 14) {
-    return "blue";
-  }
-
-  if (type === 5 || type === 6) {
-    return "blue";
-  }
-
-  if (icaoClass === 0) {
-    return "magenta";
-  }
-
-  if ([2, 3, 4].includes(icaoClass)) {
-    return "blue";
-  }
-
-  // Airway and TMA/CTA geometry can be classed separately by OpenAIP.
-  if ([7, 15, 26].includes(type)) {
-    return icaoClass === 0 ? "magenta" : "blue";
-  }
-
-  // UK Class G is uncontrolled and is best kept unobtrusive.
-  if (icaoClass === 6) {
-    return "grey";
-  }
-
-  return "grey";
-}
-
-function normaliseGeoJson(input) {
-  if (!input) return { type: "FeatureCollection", features: [] };
-
-  if (input.type === "FeatureCollection") {
+  // P/R/D always take priority over class information.
+  if (
+    type === TYPE_PROHIBITED ||
+    type === TYPE_RESTRICTED ||
+    type === TYPE_DANGER
+  ) {
     return {
-      type: "FeatureCollection",
-      features: (input.features || []).filter(Boolean).map((f, i) => {
-        const properties = {
-          ...(f.properties || {})
-        };
-
-        const type = Number(properties.type);
-        const icaoClass = Number(
-          properties.icaoClass ??
-          properties.icaoclass ??
-          properties.class
-        );
-
-        const typeNames = {
-          1: "Restricted",
-          2: "Danger",
-          3: "Prohibited",
-          4: "CTR",
-          5: "TMZ",
-          6: "RMZ",
-          7: "TMA",
-          8: "TRA",
-          9: "TSA",
-          10: "FIR",
-          11: "UIR",
-          12: "ADIZ",
-          13: "ATZ",
-          14: "MATZ",
-          15: "Airway",
-          26: "CTA"
-        };
-
-        const classNames = {
-          0: "A",
-          1: "B",
-          2: "C",
-          3: "D",
-          4: "E",
-          5: "F",
-          6: "G",
-          8: "SUA"
-        };
-
-        const airspaceType = typeNames[type] || "";
-        const name =
-          properties.name ||
-          properties.designator ||
-          properties.identifier ||
-          `AREA ${i + 1}`;
-
-        return {
-          ...f,
-          properties: {
-            ...properties,
-            name,
-            airspaceType,
-            icaoClassName: classNames[icaoClass] || "",
-            avimapColor: classifyAirspaceColor({
-              ...properties,
-              type,
-              icaoClass
-            })
-          }
-        };
-      })
+      color: "red",
+      dash: false,
+      category: "P/R/D"
     };
   }
 
-  if (input.type === "Feature") {
-    return normaliseGeoJson({
-      type: "FeatureCollection",
-      features: [input]
-    });
+  // ATZ and TMZ are purple and dashed.
+  if (type === TYPE_ATZ || type === TYPE_TMZ) {
+    return {
+      color: "purple",
+      dash: true,
+      category: type === TYPE_ATZ ? "ATZ" : "TMZ"
+    };
   }
 
-  return { type: "FeatureCollection", features: [] };
+  // MATZ and RMZ are blue and dashed.
+  if (type === TYPE_MATZ || type === TYPE_RMZ) {
+    return {
+      color: "blue",
+      dash: true,
+      category: type === TYPE_MATZ ? "MATZ" : "RMZ"
+    };
+  }
+
+  // Class A is purple and solid.
+  if (icaoClass === ICAO_CLASS_A) {
+    return {
+      color: "purple",
+      dash: false,
+      category: "Class A"
+    };
+  }
+
+  // Remaining controlled airspace is blue and solid.
+  if (
+    ICAO_CLASSES_CONTROLLED.has(icaoClass) ||
+    type === TYPE_CTR ||
+    type === TYPE_TMA ||
+    type === TYPE_AIRWAY ||
+    type === TYPE_CTA
+  ) {
+    return {
+      color: "blue",
+      dash: false,
+      category: "Controlled"
+    };
+  }
+
+  // Class G / unknown / other.
+  return {
+    color: "grey",
+    dash: false,
+    category: "Other"
+  };
+}
+
+function normaliseGeoJson(input) {
+  if (!input) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  if (input.type === "Feature") {
+    input = {
+      type: "FeatureCollection",
+      features: [input]
+    };
+  }
+
+  if (input.type !== "FeatureCollection") {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: (input.features || []).filter(Boolean).map((feature, index) => {
+      const properties = {
+        ...(feature.properties || {})
+      };
+
+      const style = classifyAirspaceStyle(properties);
+
+      return {
+        ...feature,
+        properties: {
+          ...properties,
+          name:
+            properties.name ||
+            properties.designator ||
+            properties.identifier ||
+            `AREA ${index + 1}`,
+
+          // Preserve the original OpenAIP fields untouched.
+          type: properties.type ?? null,
+          icaoClass:
+            properties.icaoClass ??
+            properties.icaoclass ??
+            properties.class ??
+            null,
+
+          // Explicit AviMap rendering fields.
+          avimapColor: style.color,
+          avimapDashed: style.dash,
+          avimapCategory: style.category
+        }
+      };
+    })
+  };
 }
 
 

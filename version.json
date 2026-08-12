@@ -1,6 +1,6 @@
 {
-  "version": "1.0.11",
+  "version": "1.0.12",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Revised UK VFR airspace palette: Class A purple, P/R/D red, ATZ/TMZ magenta, controlled/MATZ/RMZ blue. TMZ boundaries are dashed."
+  "releaseNotes": "Airspace styling now follows the explicit AviMap specification and uses OpenAIP type/icaoClass fields with explicit style metadata per feature."
 }
