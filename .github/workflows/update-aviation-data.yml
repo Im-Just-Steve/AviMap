@@ -13,2904 +13,840 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Install conversion dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m pip install --upgrade pip
-          python3 -m pip install lxml shapely pyproj
-
       # ============================================================
-      # DOWNLOAD NATS DATASET INDEX
+      # FIND CURRENT NATS DATASETS
       # ============================================================
 
-      - name: Download NATS dataset page
-        shell: bash
+      - name: Find current NATS datasets
         run: |
           set -euo pipefail
-
-          NATS_URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
-
-          echo "=========================================="
-          echo "Downloading NATS Digital Datasets page"
-          echo "=========================================="
 
           curl \
             --fail \
             --silent \
             --show-error \
-            --location \
-            --retry 5 \
+            --retry 3 \
             --retry-delay 5 \
-            --user-agent "Mozilla/5.0" \
-            "$NATS_URL" \
-            --output /tmp/nats.html
-
-          test -s /tmp/nats.html
-
-          echo "Downloaded:"
-          wc -c /tmp/nats.html
-
-      # ============================================================
-      # FIND CURRENT NATS AIP DATASET
-      # ============================================================
-
-      - name: Find current NATS AIP dataset
-        shell: bash
-        run: |
-          set -euo pipefail
+            "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html" \
+            -o /tmp/nats-datasets.html
 
           python3 <<'PY'
           import re
           from datetime import datetime, timezone
-          from pathlib import Path
           from urllib.parse import urljoin
 
-          BASE_URL = "https://nats-uk.ead-it.com"
+          BASE = "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
 
-          html = Path("/tmp/nats.html").read_text(
-              encoding="utf-8",
-              errors="replace"
+          html = open("/tmp/nats-datasets.html", encoding="utf-8", errors="replace").read()
+          hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, flags=re.I)
+
+          today = datetime.now(timezone.utc).date()
+
+          def choose(pattern, label):
+              candidates = []
+              for href in hrefs:
+                  m = re.search(pattern, href, flags=re.I)
+                  if not m:
+                      continue
+                  try:
+                      d = datetime.strptime(m.group(1), "%Y%m%d").date()
+                  except ValueError:
+                      continue
+                  candidates.append((d, href))
+
+              if not candidates:
+                  raise SystemExit(f"ERROR: No {label} dataset found on NATS page.")
+
+              current = [x for x in candidates if x[0] <= today]
+              selected = max(current or candidates, key=lambda x: x[0])
+              date, href = selected
+              url = urljoin(BASE, href)
+
+              print(f"{label}: {date} -> {url}")
+              return date, url
+
+          aip_date, aip_url = choose(
+              r'EG_AIP_DS_FULL_(\d{8})\.XML$',
+              "UK ICAO AIP XML"
           )
 
-          hrefs = re.findall(
-              r'href=["\']([^"\']+)["\']',
-              html,
-              flags=re.I
-          )
-
-          datasets = []
-
+          # NATS currently publishes the VRP list as CSV. The ZIP fallback
+          # keeps the workflow compatible with releases that wrap the CSV.
+          vrp_candidates = []
           for href in hrefs:
-              match = re.search(
-                  r'/ICAO_AIP/EG_AIP_DS_(\d{8})_XML\.zip$',
+              m = re.search(
+                  r'EG_VRP_DS_AREA1_FULL_(\d{8})(?:_CSV)?(?:\.CSV|_CSV\.zip|\.zip)$',
                   href,
                   flags=re.I
               )
-
-              if not match:
+              if not m:
                   continue
-
               try:
-                  date = datetime.strptime(
-                      match.group(1),
-                      "%Y%m%d"
-                  ).date()
+                  d = datetime.strptime(m.group(1), "%Y%m%d").date()
               except ValueError:
                   continue
+              vrp_candidates.append((d, href))
 
-              datasets.append((date, href))
+          if not vrp_candidates:
+              raise SystemExit("ERROR: No NATS VRP dataset found on NATS page.")
 
-          print("")
-          print("==========================================")
-          print("NATS AIP DATASET DISCOVERY")
-          print("==========================================")
+          current_vrp = [x for x in vrp_candidates if x[0] <= today]
+          vrp_date, vrp_href = max(current_vrp or vrp_candidates, key=lambda x: x[0])
+          vrp_url = urljoin(BASE, vrp_href)
 
-          if not datasets:
-              print("ERROR: No NATS AIP XML datasets found.")
-              raise SystemExit(1)
+          print(f"VRP dataset: {vrp_date} -> {vrp_url}")
 
-          today = datetime.now(
-              timezone.utc
-          ).date()
-
-          usable = [
-              item for item in datasets
-              if item[0] <= today
-          ]
-
-          if not usable:
-              raise SystemExit(
-                  "ERROR: No effective NATS AIP dataset found."
-              )
-
-          effective_date, href = max(
-              usable,
-              key=lambda item: item[0]
-          )
-
-          url = urljoin(BASE_URL, href)
-
-          print("Selected AIRAC:")
-          print(effective_date)
-          print("")
-          print("Selected URL:")
-          print(url)
-
-          Path("/tmp/nats-aip-url.txt").write_text(
-              url,
-              encoding="utf-8"
-          )
-
-          Path("/tmp/nats-aip-date.txt").write_text(
-              str(effective_date),
-              encoding="utf-8"
-          )
+          with open("/tmp/nats-aip-url.txt", "w") as f:
+              f.write(aip_url)
+          with open("/tmp/nats-aip-date.txt", "w") as f:
+              f.write(str(aip_date))
+          with open("/tmp/nats-vrp-url.txt", "w") as f:
+              f.write(vrp_url)
+          with open("/tmp/nats-vrp-date.txt", "w") as f:
+              f.write(str(vrp_date))
           PY
 
       # ============================================================
-      # DOWNLOAD NATS AIP
+      # DOWNLOAD NATS AIXM
       # ============================================================
 
-      - name: Download NATS AIP dataset
-        shell: bash
+      - name: Download NATS UK ICAO AIP AIXM
         run: |
           set -euo pipefail
 
           AIP_URL=$(cat /tmp/nats-aip-url.txt)
 
-          echo ""
-          echo "=========================================="
-          echo "Downloading NATS AIP dataset"
-          echo "=========================================="
-          echo "$AIP_URL"
+          echo "Downloading: ${AIP_URL}"
 
           curl \
             --fail \
             --silent \
             --show-error \
-            --location \
-            --retry 5 \
+            --retry 3 \
             --retry-delay 5 \
-            --user-agent "AviMap/1.0" \
-            "$AIP_URL" \
-            --output /tmp/nats-aip.zip
+            -L \
+            "${AIP_URL}" \
+            -o /tmp/uk-aip.xml
 
-          test -s /tmp/nats-aip.zip
+          test -s /tmp/uk-aip.xml
 
-          unzip -t /tmp/nats-aip.zip
-
-          mkdir -p /tmp/nats-aip
-
-          unzip \
-            -o \
-            /tmp/nats-aip.zip \
-            -d /tmp/nats-aip
-
-          echo ""
-          echo "Extracted files:"
-          find /tmp/nats-aip -type f -print
+          echo "Downloaded AIXM dataset:"
+          ls -lh /tmp/uk-aip.xml
 
       # ============================================================
-      # LOCATE FULL AIP XML
+      # DOWNLOAD NATS VRPS
       # ============================================================
 
-      - name: Locate full NATS AIP XML
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          AIRAC=$(cat /tmp/nats-aip-date.txt)
-          AIRAC_COMPACT="${AIRAC//-/}"
-
-          EXPECTED="EG_AIP_DS_FULL_${AIRAC_COMPACT}.xml"
-
-          echo ""
-          echo "=========================================="
-          echo "Locating FULL NATS AIP XML"
-          echo "=========================================="
-          echo "Expected:"
-          echo "$EXPECTED"
-          echo ""
-
-          XML_FILE=$(
-            find \
-              /tmp/nats-aip \
-              -type f \
-              -iname "$EXPECTED" \
-              | head -n 1
-          )
-
-          if [ -z "$XML_FILE" ]; then
-            echo "ERROR: FULL NATS AIP XML not found."
-            echo "The DELTA dataset will NOT be used."
-            exit 1
-          fi
-
-          echo "FULL NATS AIP XML:"
-          echo "$XML_FILE"
-
-          printf '%s' "$XML_FILE" \
-            > /tmp/nats-aip-xml-file.txt
-
-      # ============================================================
-      # FIND CURRENT NATS VRP DATASET
-      # ============================================================
-
-      - name: Find current NATS VRP dataset
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 <<'PY'
-          import re
-          from datetime import datetime, timezone
-          from pathlib import Path
-          from urllib.parse import urljoin
-
-          BASE_URL = "https://nats-uk.ead-it.com"
-
-          html = Path("/tmp/nats.html").read_text(
-              encoding="utf-8",
-              errors="replace"
-          )
-
-          hrefs = re.findall(
-              r'href=["\']([^"\']+)["\']',
-              html,
-              flags=re.I
-          )
-
-          datasets = []
-
-          for href in hrefs:
-              match = re.search(
-                  r'/VRP/EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
-                  href,
-                  flags=re.I
-              )
-
-              if not match:
-                  continue
-
-              try:
-                  date = datetime.strptime(
-                      match.group(1),
-                      "%Y%m%d"
-                  ).date()
-              except ValueError:
-                  continue
-
-              datasets.append((date, href))
-
-          print("")
-          print("==========================================")
-          print("NATS VRP DATASET DISCOVERY")
-          print("==========================================")
-
-          if not datasets:
-              raise SystemExit(
-                  "ERROR: No NATS VRP datasets found."
-              )
-
-          today = datetime.now(
-              timezone.utc
-          ).date()
-
-          usable = [
-              item for item in datasets
-              if item[0] <= today
-          ]
-
-          if not usable:
-              raise SystemExit(
-                  "ERROR: No effective NATS VRP dataset found."
-              )
-
-          effective_date, href = max(
-              usable,
-              key=lambda item: item[0]
-          )
-
-          url = urljoin(BASE_URL, href)
-
-          print("Selected VRP date:")
-          print(effective_date)
-          print("")
-          print("Selected URL:")
-          print(url)
-
-          Path("/tmp/nats-vrp-url.txt").write_text(
-              url,
-              encoding="utf-8"
-          )
-          PY
-
-      # ============================================================
-      # DOWNLOAD VRP
-      # ============================================================
-
-      - name: Download NATS VRP dataset
-        shell: bash
+      - name: Download NATS VRP list
         run: |
           set -euo pipefail
 
           VRP_URL=$(cat /tmp/nats-vrp-url.txt)
 
-          echo ""
-          echo "=========================================="
-          echo "Downloading NATS VRP dataset"
-          echo "=========================================="
-          echo "$VRP_URL"
+          echo "Downloading: ${VRP_URL}"
 
           curl \
             --fail \
             --silent \
             --show-error \
-            --location \
-            --retry 5 \
+            --retry 3 \
             --retry-delay 5 \
-            --user-agent "AviMap/1.0" \
-            "$VRP_URL" \
-            --output /tmp/nats-vrp.zip
+            -L \
+            "${VRP_URL}" \
+            -o /tmp/nats-vrp-source
 
-          test -s /tmp/nats-vrp.zip
+          test -s /tmp/nats-vrp-source
 
           mkdir -p /tmp/nats-vrp
 
-          unzip \
-            -o \
-            /tmp/nats-vrp.zip \
-            -d /tmp/nats-vrp
+          if file /tmp/nats-vrp-source | grep -qi zip; then
+            unzip -o /tmp/nats-vrp-source -d /tmp/nats-vrp
+          else
+            cp /tmp/nats-vrp-source /tmp/nats-vrp/vrps.csv
+          fi
 
-          echo ""
-          echo "VRP files:"
-          find /tmp/nats-vrp -type f -print
+          VRP_CSV=$(find /tmp/nats-vrp -type f \
+            \( -iname '*.csv' -o -iname '*.CSV' \) | head -n 1)
+
+          if [ -z "${VRP_CSV}" ]; then
+            echo "ERROR: No CSV found in the NATS VRP dataset."
+            find /tmp/nats-vrp -type f -print
+            exit 1
+          fi
+
+          cp "${VRP_CSV}" /tmp/uk-vrps.csv
+
+          echo "Selected VRP CSV: ${VRP_CSV}"
+          wc -c /tmp/uk-vrps.csv
 
       # ============================================================
-      # CONVERT NATS AIRSPACE
+      # CONVERT NATS AIXM AIRSPACE
       # ============================================================
 
-      - name: Convert NATS AIP airspace to GeoJSON
-        shell: bash
+      - name: Convert NATS AIXM airspace to GeoJSON
         run: |
           set -euo pipefail
 
-          mkdir -p data
-
-          XML_FILE=$(cat /tmp/nats-aip-xml-file.txt)
-          AIRAC=$(cat /tmp/nats-aip-date.txt)
-
-          echo ""
-          echo "=========================================="
-          echo "Converting NATS AIP airspace"
-          echo "=========================================="
-          echo ""
-          echo "AIRAC:"
-          echo "$AIRAC"
-          echo ""
-          echo "XML:"
-          echo "$XML_FILE"
-          echo ""
+          mkdir -p /tmp/avimap-data
 
           python3 <<'PY'
-          from pathlib import Path
-          from lxml import etree
-          from shapely.geometry import Polygon, mapping
-          from shapely.ops import unary_union
-          from pyproj import Geod
           import json
+          import math
           import re
-          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
 
-          XML_FILE = Path(
-              "/tmp/nats-aip-xml-file.txt"
-          ).read_text(
-              encoding="utf-8"
-          ).strip()
+          XML = "/tmp/uk-aip.xml"
+          OUT = "/tmp/avimap-data/uk-airspace.geojson"
 
-          AIRAC = Path(
-              "/tmp/nats-aip-date.txt"
-          ).read_text(
-              encoding="utf-8"
-          ).strip()
+          def local(tag):
+              return tag.rsplit("}", 1)[-1]
 
-          OUTPUT = Path(
-              "data/uk-airspace.geojson"
-          )
-
-          GML = "http://www.opengis.net/gml/3.2"
-          XLINK = "http://www.w3.org/1999/xlink"
-
-          geod = Geod(
-              ellps="WGS84"
-          )
-
-          parser = etree.XMLParser(
-              huge_tree=True,
-              recover=False,
-              remove_comments=True
-          )
-
-          print("Parsing FULL NATS AIP XML...")
-
-          tree = etree.parse(
-              XML_FILE,
-              parser
-          )
-
-          root = tree.getroot()
-
-          print("XML parsed successfully.")
-
-          # ========================================================
-          # INDEX XML OBJECTS
-          # ========================================================
-
-          id_index = {}
-
-          for element in root.iter():
-              gml_id = element.get(
-                  f"{{{GML}}}id"
-              )
-
-              if gml_id:
-                  id_index[gml_id] = element
-
-          print(
-              f"Indexed XML objects: {len(id_index)}"
-          )
-
-          # ========================================================
-          # BASIC HELPERS
-          # ========================================================
-
-          def lname(element):
-              return etree.QName(element).localname
-
-
-          def text(element):
-              if element is None:
-                  return ""
-
-              return re.sub(
-                  r"\s+",
-                  " ",
-                  "".join(element.itertext())
-              ).strip()
-
-
-          def href(element):
-              return element.get(
-                  f"{{{XLINK}}}href"
-              )
-
-
-          def resolve(element):
-              value = href(element)
-
-              if not value:
-                  return element
-
-              if "#" in value:
-                  fragment = value.rsplit(
-                      "#",
-                      1
-                  )[1]
-
-                  if fragment in id_index:
-                      return id_index[fragment]
-
-              return element
-
-
-          def first_text(element, names):
-              wanted = {
-                  name.lower()
-                  for name in names
-              }
-
-              for child in element.iter():
-                  if lname(
-                      child
-                  ).lower() in wanted:
-
-                      value = text(child)
-
+          def text_of(parent, names):
+              wanted = set(names)
+              for e in parent.iter():
+                  if local(e.tag) in wanted and e.text:
+                      value = e.text.strip()
                       if value:
                           return value
-
               return ""
 
-
-          def direct_or_reference(
-              element,
-              child_name
-          ):
-              matches = element.xpath(
-                  f"./*[local-name()='{child_name}']"
-              )
-
-              result = []
-
-              for child in matches:
-                  target = resolve(child)
-
-                  if target is not None:
-                      result.append(target)
-
-              return result
-
-
-          # ========================================================
-          # AIRSPACE FILTER
-          #
-          # ONLY KEEP:
-          #
-          # CLASS A-G
-          # P
-          # R
-          # D
-          # ATZ
-          # MATZ
-          # RMZ
-          # TMZ
-          #
-          # EVERYTHING ELSE IS OMITTED.
-          # ========================================================
-
-          ALLOWED_CLASSES = {
-              "A",
-              "B",
-              "C",
-              "D",
-              "E",
-              "F",
-              "G"
-          }
-
-          ALLOWED_SPECIAL = {
-              "P",
-              "R",
-              "D",
-              "ATZ",
-              "MATZ",
-              "RMZ",
-              "TMZ"
-          }
-
-
-          def normalise(value):
-              return re.sub(
-                  r"[^A-Z0-9]",
-                  "",
-                  (value or "").upper()
-              )
-
-
-          def classify_airspace(
-              designator,
-              name,
-              air_type,
-              local_type,
-              classification
-          ):
-              designator = (
-                  designator or ""
-              ).upper().strip()
-
-              name = (
-                  name or ""
-              ).upper().strip()
-
-              air_type = normalise(
-                  air_type
-              )
-
-              local_type = normalise(
-                  local_type
-              )
-
-              classification = normalise(
-                  classification
-              )
-
-              # ----------------------------------------------------
-              # CLASS A-G
-              # ----------------------------------------------------
-
-              if classification in ALLOWED_CLASSES:
-                  return (
-                      True,
-                      classification,
-                      f"CLASS_{classification}",
-                      "solid"
-                  )
-
-              # ----------------------------------------------------
-              # P / R / D
-              # ----------------------------------------------------
-
-              if air_type in {
-                  "P",
-                  "PROHIBITED"
-              }:
-                  return (
-                      True,
-                      "P",
-                      "PROHIBITED",
-                      "solid"
-                  )
-
-              if air_type in {
-                  "R",
-                  "RESTRICTED"
-              }:
-                  return (
-                      True,
-                      "R",
-                      "RESTRICTED",
-                      "solid"
-                  )
-
-              if air_type in {
-                  "D",
-                  "DANGER"
-              }:
-                  return (
-                      True,
-                      "D",
-                      "DANGER",
-                      "solid"
-                  )
-
-              # ----------------------------------------------------
-              # SPECIAL ZONES
-              # ----------------------------------------------------
-
-              for special in (
-                  "MATZ",
-                  "ATZ",
-                  "RMZ",
-                  "TMZ"
-              ):
-
-                  if special in {
-                      air_type,
-                      local_type,
-                      classification
-                  }:
-                      return (
-                          True,
-                          special,
-                          special,
-                          "dashed"
-                      )
-
-              # Conservative name/designator fallback.
-              combined = (
-                  designator
-                  + " "
-                  + name
-              )
-
-              for special in (
-                  "MATZ",
-                  "ATZ",
-                  "RMZ",
-                  "TMZ"
-              ):
-
-                  if re.search(
-                      rf"(?<![A-Z0-9]){special}(?![A-Z0-9])",
-                      combined
-                  ):
-                      return (
-                          True,
-                          special,
-                          special,
-                          "dashed"
-                      )
-
-              return (
-                  False,
-                  None,
-                  None,
-                  None
-              )
-
-
-          # ========================================================
-          # COORDINATE HELPERS
-          # ========================================================
-
-          def numbers(value):
-              return [
-                  float(number)
-                  for number in re.findall(
-                      r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
-                      value or ""
-                  )
-              ]
-
-
-          def geometry_srs(element):
-              current = element
-
-              while current is not None:
-                  value = current.get(
-                      "srsName"
-                  )
-
-                  if value:
-                      return value
-
-                  current = current.getparent()
-
-              return (
-                  "urn:ogc:def:crs:EPSG::4326"
-              )
-
-
-          def lat_first(srs):
-              value = (
-                  srs or ""
-              ).upper()
-
-              return (
-                  "EPSG::4326" in value
-                  or
-                  "EPSG:4326" in value
-                  or
-                  "EPSG/0/4326" in value
-              )
-
-
-          def position_pairs(
-              element
-          ):
-              pos_lists = element.xpath(
-                  ".//*[local-name()='posList']"
-              )
-
-              if pos_lists:
-                  node = pos_lists[0]
-
-                  values = numbers(
-                      text(node)
-                  )
-
-                  if len(values) < 2:
-                      return []
-
-                  try:
-                      dimension = int(
-                          node.get(
-                              "srsDimension",
-                              "2"
-                          )
-                      )
-                  except Exception:
-                      dimension = 2
-
-                  dimension = max(
-                      dimension,
-                      2
-                  )
-
-                  pairs = []
-
-                  for i in range(
-                      0,
-                      len(values) - 1,
-                      dimension
-                  ):
-                      pairs.append(
-                          (
-                              values[i],
-                              values[i + 1]
-                          )
-                      )
-
-                  return pairs
-
-              positions = element.xpath(
-                  ".//*[local-name()='pos']"
-              )
-
-              pairs = []
-
-              for node in positions:
-                  values = numbers(
-                      text(node)
-                  )
-
-                  if len(values) >= 2:
-                      pairs.append(
-                          (
-                              values[0],
-                              values[1]
-                          )
-                      )
-
-              return pairs
-
-
-          def to_lon_lat(
-              pair,
-              srs
-          ):
-              first, second = pair
-
-              if lat_first(srs):
-                  return (
-                      second,
-                      first
-                  )
-
-              return (
-                  first,
-                  second
-              )
-
-
-          def coordinates(
-              element,
-              srs
-          ):
-              return [
-                  to_lon_lat(
-                      pair,
-                      srs
-                  )
-                  for pair in position_pairs(
-                      element
-                  )
-              ]
-
-
-          # ========================================================
-          # RADIUS
-          # ========================================================
-
-          def radius_metres(
-              element
-          ):
+          def all_text(parent, names):
+              wanted = set(names)
+              values = []
+              for e in parent.iter():
+                  if local(e.tag) in wanted and e.text:
+                      value = e.text.strip()
+                      if value:
+                          values.append(value)
+              return values
+
+          def number(value):
               try:
-                  value = float(
-                      text(element)
-                  )
+                  return float(str(value).strip())
               except Exception:
                   return None
 
-              unit = (
-                  element.get(
-                      "uom",
-                      "m"
-                  )
-                  .strip()
-                  .lower()
-              )
-
-              if unit in {
-                  "m",
-                  "meter",
-                  "metre",
-                  "meters",
-                  "metres"
-              }:
-                  return value
-
-              if unit in {
-                  "km",
-                  "kilometer",
-                  "kilometre"
-              }:
-                  return value * 1000
-
-              if unit in {
-                  "nm",
-                  "nmi",
-                  "[nmi_i]"
-              }:
-                  return value * 1852
-
-              if unit in {
-                  "ft",
-                  "foot",
-                  "feet"
-              }:
-                  return value * 0.3048
-
-              if unit == "mi":
-                  return value * 1609.344
-
-              return value
-
-
-          # ========================================================
-          # ARC / CIRCLE
-          # ========================================================
-
-          def arc_points(
-              segment,
-              srs
-          ):
-              centre_values = position_pairs(
-                  segment
-              )
-
-              if not centre_values:
-
-                  point_nodes = segment.xpath(
-                      ".//*[local-name()='pointProperty']"
-                  )
-
-                  for node in point_nodes:
-                      target = resolve(node)
-
-                      centre_values = position_pairs(
-                          target
-                      )
-
-                      if centre_values:
-                          break
-
-              if not centre_values:
-                  return []
-
-              centre = to_lon_lat(
-                  centre_values[0],
-                  srs
-              )
-
-              radius_nodes = segment.xpath(
-                  ".//*[local-name()='radius']"
-              )
-
-              if not radius_nodes:
-                  return []
-
-              radius = radius_metres(
-                  radius_nodes[0]
-              )
-
-              if radius is None:
-                  return []
-
-              start_nodes = segment.xpath(
-                  ".//*[local-name()='startAngle']"
-              )
-
-              end_nodes = segment.xpath(
-                  ".//*[local-name()='endAngle']"
-              )
-
-              # Full circle.
-              if not start_nodes or not end_nodes:
-
-                  count = 96
-                  result = []
-
-                  for i in range(
-                      count + 1
-                  ):
-
-                      angle = (
-                          360.0
-                          * i
-                          / count
-                      )
-
-                      lon, lat, _ = geod.fwd(
-                          centre[0],
-                          centre[1],
-                          angle,
-                          radius
-                      )
-
-                      result.append(
-                          (
-                              lon,
-                              lat
-                          )
-                      )
-
-                  return result
-
-              try:
-                  start = float(
-                      text(
-                          start_nodes[0]
-                      )
-                  )
-
-                  end = float(
-                      text(
-                          end_nodes[0]
-                      )
-                  )
-              except Exception:
-                  return []
-
-              difference = end - start
-
-              steps = max(
-                  4,
-                  int(
-                      abs(difference) / 3
-                  ) + 1
-              )
-
-              result = []
-
-              for i in range(
-                  steps + 1
-              ):
-
-                  fraction = (
-                      i / steps
-                  )
-
-                  angle = (
-                      start
-                      +
-                      difference * fraction
-                  )
-
-                  lon, lat, _ = geod.fwd(
-                      centre[0],
-                      centre[1],
-                      angle,
-                      radius
-                  )
-
-                  result.append(
-                      (
-                          lon,
-                          lat
-                      )
-                  )
-
-              return result
-
-
-          # ========================================================
-          # CURVE
-          # ========================================================
-
-          def curve_segment_points(
-              segment,
-              srs
-          ):
-              segment_name = lname(
-                  segment
-              ).lower()
-
-              if segment_name in {
-                  "geodesicstring",
-                  "linestringsegment",
-                  "linestring",
-                  "linearring"
-              }:
-                  return coordinates(
-                      segment,
-                      srs
-                  )
-
-              if segment_name in {
-                  "arcbycenterpoint",
-                  "circlebycenterpoint"
-              }:
-                  return arc_points(
-                      segment,
-                      srs
-                  )
-
-              return coordinates(
-                  segment,
-                  srs
-              )
-
-
-          def curve_points(
-              curve,
-              srs
-          ):
-              curve = resolve(curve)
-
-              local_srs = (
-                  curve.get(
-                      "srsName"
-                  )
-                  or srs
-              )
-
-              segments = curve.xpath(
-                  ".//*[local-name()='segments']/*"
-              )
-
-              result = []
-
-              for segment in segments:
-
-                  points = curve_segment_points(
-                      segment,
-                      local_srs
-                  )
-
-                  if not points:
-                      continue
-
-                  if result and points:
-
-                      if (
-                          abs(
-                              result[-1][0]
-                              -
-                              points[0][0]
-                          ) < 1e-10
-                          and
-                          abs(
-                              result[-1][1]
-                              -
-                              points[0][1]
-                          ) < 1e-10
-                      ):
-                          points = points[1:]
-
-                  result.extend(
-                      points
-                  )
-
-              return result
-
-
-          # ========================================================
-          # RING
-          # ========================================================
-
-          def ring_points(
-              ring,
-              srs
-          ):
-              ring = resolve(ring)
-
-              linear_rings = ring.xpath(
-                  ".//*[local-name()='LinearRing']"
-              )
-
-              if linear_rings:
-
-                  return coordinates(
-                      linear_rings[0],
-                      srs
-                  )
-
-              members = ring.xpath(
-                  "./*[local-name()='curveMember']"
-              )
-
-              result = []
-
-              for member in members:
-
-                  target = resolve(member)
-
-                  curves = []
-
-                  if target is not None:
-
-                      if lname(
-                          target
-                      ).lower() == "curve":
-
-                          curves.append(
-                              target
-                          )
-                      else:
-
-                          curves.extend(
-                              target.xpath(
-                                  ".//*[local-name()='Curve']"
-                              )
-                          )
-
-                  if not curves:
-
-                      curves = member.xpath(
-                          ".//*[local-name()='Curve']"
-                      )
-
-                  for curve in curves:
-
-                      points = curve_points(
-                          curve,
-                          srs
-                      )
-
-                      if not points:
+          def pairs_from_poslist(text):
+              nums = []
+              for token in re.split(r"[\\s,]+", text.strip()):
+                  if token:
+                      try:
+                          nums.append(float(token))
+                      except ValueError:
+                          pass
+              return nums
+
+          def ring_from_element(ring):
+              # Prefer posList.
+              for e in ring.iter():
+                  if local(e.tag) == "posList" and e.text:
+                      nums = pairs_from_poslist(e.text)
+                      if len(nums) < 6:
                           continue
+                      coords = []
+                      for i in range(0, len(nums) - 1, 2):
+                          # AIXM 5.1 normally uses EPSG:4326 for aviation
+                          # data: latitude first, longitude second.
+                          lat, lon = nums[i], nums[i + 1]
+                          coords.append([lon, lat])
+                      return coords
 
-                      if result and points:
+              # Fallback to individual gml:pos elements.
+              coords = []
+              for e in ring.iter():
+                  if local(e.tag) != "pos" or not e.text:
+                      continue
+                  nums = pairs_from_poslist(e.text)
+                  if len(nums) >= 2:
+                      coords.append([nums[1], nums[0]])
+              return coords
 
-                          if (
-                              abs(
-                                  result[-1][0]
-                                  -
-                                  points[0][0]
-                              ) < 1e-10
-                              and
-                              abs(
-                                  result[-1][1]
-                                  -
-                                  points[0][1]
-                              ) < 1e-10
-                          ):
-                              points = points[1:]
-
-                      result.extend(
-                          points
-                      )
-
-              return result
-
-
-          # ========================================================
-          # POLYGON PATCH
-          # ========================================================
-
-          def polygon_from_patch(
-              patch,
-              srs
-          ):
-              exterior = patch.xpath(
-                  "./*[local-name()='exterior']"
-              )
-
-              if not exterior:
-
-                  exterior = patch.xpath(
-                      ".//*[local-name()='exterior']"
-                  )
-
-              if not exterior:
+          def circle_geometry(container):
+              circle = None
+              for e in container.iter():
+                  if local(e.tag) == "CircleByCenterPoint":
+                      circle = e
+                      break
+              if circle is None:
                   return None
 
-              linear_rings = exterior[0].xpath(
-                  ".//*[local-name()='LinearRing']"
-              )
+              pos = None
+              radius = None
+              radius_uom = "NM"
 
-              if linear_rings:
+              for e in circle.iter():
+                  if local(e.tag) == "pos" and e.text and pos is None:
+                      vals = pairs_from_poslist(e.text)
+                      if len(vals) >= 2:
+                          pos = (vals[0], vals[1])
+                  elif local(e.tag) == "radius" and e.text:
+                      radius = number(e.text)
+                      radius_uom = e.attrib.get("uom", "NM").upper()
 
-                  outer = coordinates(
-                      linear_rings[0],
-                      srs
-                  )
+              if pos is None or radius is None:
+                  return None
 
+              lat, lon = pos
+              if radius_uom in ("M", "METRE", "METRES", "METER", "METERS"):
+                  radius_nm = radius / 1852.0
+              elif radius_uom in ("KM",):
+                  radius_nm = radius / 1.852
               else:
+                  radius_nm = radius
 
-                  rings = exterior[0].xpath(
-                      ".//*[local-name()='Ring']"
+              # Approximate circular AIXM geometry with a 96-point polygon.
+              R = 3440.065
+              lat_rad = math.radians(lat)
+              angular = radius_nm / R
+              coords = []
+
+              for i in range(97):
+                  bearing = 2 * math.pi * i / 96
+                  lat2 = math.asin(
+                      math.sin(lat_rad) * math.cos(angular)
+                      + math.cos(lat_rad) * math.sin(angular) * math.cos(bearing)
                   )
-
-                  if not rings:
-                      return None
-
-                  outer = ring_points(
-                      rings[0],
-                      srs
+                  lon2 = math.radians(lon) + math.atan2(
+                      math.sin(bearing) * math.sin(angular) * math.cos(lat_rad),
+                      math.cos(angular) - math.sin(lat_rad) * math.sin(lat2)
                   )
+                  coords.append([
+                      math.degrees(lon2),
+                      math.degrees(lat2)
+                  ])
 
-              if len(outer) < 3:
-                  return None
+              return coords
 
-              if outer[0] != outer[-1]:
-                  outer.append(
-                      outer[0]
-                  )
+          def geometry_from_airspace(airspace):
+              polygons = []
 
-              holes = []
-
-              interiors = patch.xpath(
-                  "./*[local-name()='interior']"
-              )
-
-              for interior in interiors:
-
-                  linear_rings = interior.xpath(
-                      ".//*[local-name()='LinearRing']"
-                  )
-
-                  if linear_rings:
-
-                      hole = coordinates(
-                          linear_rings[0],
-                          srs
-                      )
-
-                  else:
-
-                      rings = interior.xpath(
-                          ".//*[local-name()='Ring']"
-                      )
-
-                      if not rings:
-                          continue
-
-                      hole = ring_points(
-                          rings[0],
-                          srs
-                      )
-
-                  if len(hole) < 3:
+              for e in airspace.iter():
+                  if local(e.tag) != "Polygon":
                       continue
 
-                  if hole[0] != hole[-1]:
-                      hole.append(
-                          hole[0]
-                      )
+                  rings = []
 
-                  holes.append(
-                      hole
-                  )
+                  for child in e.iter():
+                      if local(child.tag) != "LinearRing":
+                          continue
+                      ring = ring_from_element(child)
+                      if len(ring) >= 4:
+                          rings.append(ring)
 
-              try:
+                  if rings:
+                      polygons.append(rings)
 
-                  polygon = Polygon(
-                      outer,
-                      holes
-                  )
+              if polygons:
+                  if len(polygons) == 1:
+                      return {
+                          "type": "Polygon",
+                          "coordinates": polygons[0]
+                      }
+                  return {
+                      "type": "MultiPolygon",
+                      "coordinates": polygons
+                  }
 
-              except Exception:
-
-                  return None
-
-              if polygon.is_empty:
-                  return None
-
-              if not polygon.is_valid:
-                  polygon = polygon.buffer(0)
-
-              if polygon.is_empty:
-                  return None
-
-              return polygon
-
-
-          # ========================================================
-          # SURFACE
-          # ========================================================
-
-          def surface_geometry(
-              surface
-          ):
-              surface = resolve(surface)
-
-              srs = geometry_srs(
-                  surface
-              )
-
-              patches = surface.xpath(
-                  ".//*[local-name()='PolygonPatch']"
-              )
-
-              geometries = []
-
-              for patch in patches:
-
-                  polygon = polygon_from_patch(
-                      patch,
-                      srs
-                  )
-
-                  if polygon is not None:
-                      geometries.append(
-                          polygon
-                      )
-
-              if not geometries:
-                  return None
-
-              try:
-                  return unary_union(
-                      geometries
-                  )
-              except Exception:
-                  return geometries[0]
-
-
-          # ========================================================
-          # AIRSPACE VOLUME
-          # ========================================================
-
-          def volume_geometry(
-              volume
-          ):
-              volume = resolve(volume)
-
-              surfaces = direct_or_reference(
-                  volume,
-                  "horizontalProjection"
-              )
-
-              geometries = []
-
-              for surface in surfaces:
-
-                  geometry = surface_geometry(
-                      surface
-                  )
-
-                  if geometry is not None:
-                      geometries.append(
-                          geometry
-                      )
-
-              if not geometries:
-
-                  surfaces = volume.xpath(
-                      ".//*[local-name()='Surface']"
-                  )
-
-                  for surface in surfaces:
-
-                      geometry = surface_geometry(
-                          surface
-                      )
-
-                      if geometry is not None:
-                          geometries.append(
-                              geometry
-                          )
-
-              if not geometries:
-                  return None
-
-              try:
-                  return unary_union(
-                      geometries
-                  )
-              except Exception:
-                  return geometries[0]
-
-
-          # ========================================================
-          # GEOMETRY COMPONENTS
-          # ========================================================
-
-          def geometry_components(
-              timeslice
-          ):
-              components = []
-
-              for node in timeslice.xpath(
-                  "./*[local-name()='geometryComponent']"
-              ):
-
-                  component = resolve(node)
-
-                  components.append(
-                      component
-                  )
-
-              if not components:
-
-                  components = timeslice.xpath(
-                      ".//*[local-name()='AirspaceGeometryComponent']"
-                  )
-
-              return components
-
-
-          def component_operation(
-              component
-          ):
-              return first_text(
-                  component,
-                  [
-                      "operation"
-                  ]
-              ).upper()
-
-
-          def component_sequence(
-              component
-          ):
-              value = first_text(
-                  component,
-                  [
-                      "operationSequence"
-                  ]
-              )
-
-              try:
-                  return int(value)
-              except Exception:
-                  return 999999
-
-
-          def component_volume(
-              component
-          ):
-              direct = direct_or_reference(
-                  component,
-                  "theAirspaceVolume"
-              )
-
-              if direct:
-                  return direct[0]
-
-              volumes = component.xpath(
-                  ".//*[local-name()='AirspaceVolume']"
-              )
-
-              if volumes:
-                  return resolve(
-                      volumes[0]
-                  )
+              circle = circle_geometry(airspace)
+              if circle:
+                  return {
+                      "type": "Polygon",
+                      "coordinates": [circle]
+                  }
 
               return None
 
+          def normalise(value):
+              return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
-          # ========================================================
-          # AIRSPACE GEOMETRY
-          # ========================================================
+          def classify(airspace_type, icao_class, name, designator):
+              """
+              Convert NATS/AIXM terminology into the canonical AviMap
+              categories.
 
-          def airspace_geometry(
-              timeslice
-          ):
-              components = geometry_components(
-                  timeslice
-              )
+              Canonical categories:
+                A-G, PA, RA, DA, ATZ, MATZ, RMZ, TMZ
 
-              if not components:
-                  return (
-                      None,
-                      0,
-                      []
-                  )
-
-              ordered = sorted(
-                  components,
-                  key=component_sequence
-              )
-
-              result = None
-              operations = []
-
-              for component in ordered:
-
-                  operation = component_operation(
-                      component
-                  )
-
-                  operations.append(
-                      operation
-                  )
-
-                  volume = component_volume(
-                      component
-                  )
-
-                  if volume is None:
-                      continue
-
-                  geometry = volume_geometry(
-                      volume
-                  )
-
-                  if geometry is None:
-                      continue
-
-                  if result is None:
-
-                      result = geometry
-                      continue
-
-                  if operation in {
-                      "SUBTRACTION",
-                      "SUBTR"
-                  }:
-
-                      try:
-                          result = result.difference(
-                              geometry
-                          )
-                      except Exception:
-                          pass
-
-                  elif operation in {
-                      "INTERSECTION",
-                      "INTERS"
-                  }:
-
-                      try:
-                          result = result.intersection(
-                              geometry
-                          )
-                      except Exception:
-                          pass
-
-                  else:
-
-                      try:
-                          result = result.union(
-                              geometry
-                          )
-                      except Exception:
-                          pass
-
-              return (
-                  result,
-                  len(components),
-                  operations
-              )
-
-
-          # ========================================================
-          # FIND AIRSPACE
-          # ========================================================
-
-          airspaces = root.xpath(
-              "//*[local-name()='Airspace']"
-          )
-
-          print("")
-          print(
-              f"NATS Airspace features found: {len(airspaces)}"
-          )
-
-          if not airspaces:
-
-              print(
-                  "ERROR: No Airspace features found."
-              )
-
-              sys.exit(1)
-
-
-          # ========================================================
-          # FILTER BEFORE GEOMETRY PROCESSING
-          # ========================================================
-
-          selected = []
-          omitted = 0
-          omitted_types = {}
-
-          for airspace in airspaces:
-
-              timeslices = airspace.xpath(
-                  ".//*[local-name()='AirspaceTimeSlice']"
-              )
-
-              timeslice = (
-                  timeslices[-1]
-                  if timeslices
-                  else airspace
-              )
-
-              designator = first_text(
-                  timeslice,
-                  [
-                      "designator"
-                  ]
-              )
-
-              name = first_text(
-                  timeslice,
-                  [
-                      "name"
-                  ]
-              )
-
-              air_type = first_text(
-                  timeslice,
-                  [
-                      "type"
-                  ]
-              )
-
-              local_type = first_text(
-                  timeslice,
-                  [
-                      "localType"
-                  ]
-              )
-
-              classification = first_text(
-                  timeslice,
-                  [
-                      "classification"
-                  ]
-              )
-
-              (
-                  keep,
-                  category,
-                  category_name,
-                  boundary
-              ) = classify_airspace(
-                  designator,
+              NATS/AIXM releases are not perfectly consistent about which
+              field contains the useful subtype, so inspect all supplied
+              values rather than relying on only the first <type> element.
+              """
+              values = [
+                  airspace_type,
+                  icao_class,
                   name,
-                  air_type,
-                  local_type,
-                  classification
+                  designator,
+              ]
+
+              combined = " ".join(
+                  str(v or "").upper()
+                  for v in values
               )
 
-              if keep:
+              compact = re.sub(
+                  r"[^A-Z0-9]+",
+                  " ",
+                  combined
+              ).strip()
 
-                  selected.append(
-                      (
-                          airspace,
-                          timeslice,
-                          designator,
-                          name,
-                          air_type,
-                          local_type,
-                          classification,
-                          category,
-                          category_name,
-                          boundary
-                      )
-                  )
+              # Special zones first.
+              if re.search(
+                  r"\b(MATZ|MILITARY\s+AERODROME\s+TRAFFIC\s+ZONE|MILITARY\s+ATZ)\b",
+                  compact
+              ):
+                  return "MATZ"
 
-              else:
+              if re.search(
+                  r"\b(RMZ|RADIO\s+(?:COMMUNICATION\s+)?MANDATORY\s+ZONE)\b",
+                  compact
+              ):
+                  return "RMZ"
 
-                  omitted += 1
+              if re.search(
+                  r"\b(TMZ|TRANSPONDER\s+MANDATORY\s+ZONE)\b",
+                  compact
+              ):
+                  return "TMZ"
 
-                  key = (
-                      normalise(air_type)
-                      or
-                      normalise(local_type)
-                      or
-                      normalise(classification)
-                      or
-                      "OTHER"
-                  )
+              if re.search(
+                  r"\b(ATZ|AERODROME\s+TRAFFIC\s+ZONE)\b",
+                  compact
+              ):
+                  return "ATZ"
 
-                  omitted_types[key] = (
-                      omitted_types.get(
-                          key,
-                          0
-                      )
-                      + 1
-                  )
+              # P/R/D areas. Use explicit words or canonical abbreviations.
+              # Do not confuse Class D with DA.
+              if re.search(
+                  r"\b(PROHIBITED(?:\s+AREA)?|PA)\b",
+                  compact
+              ):
+                  return "PA"
 
+              if re.search(
+                  r"\b(RESTRICTED(?:\s+AREA)?|RA)\b",
+                  compact
+              ):
+                  return "RA"
 
-          print("")
-          print("==========================================")
-          print("AIRSPACE FILTER")
-          print("==========================================")
-          print("")
-          print(
-              f"Source NATS airspace: {len(airspaces)}"
-          )
-          print(
-              f"Selected for AviMap: {len(selected)}"
-          )
-          print(
-              f"Omitted: {omitted}"
-          )
+              if re.search(
+                  r"\b(DANGER(?:\s+AREA)?|DA)\b",
+                  compact
+              ):
+                  return "DA"
 
-          print("")
-          print("Omitted type summary:")
-
-          for key, count in sorted(
-              omitted_types.items()
-          ):
-              print(
-                  f"  {key}: {count}"
+              # Explicit ICAO class A-G.
+              class_text = re.sub(
+                  r"[^A-Z0-9]+",
+                  "",
+                  str(icao_class or "").upper()
               )
 
-          print("")
-          print("Allowed:")
-          print("  Class A")
-          print("  Class B")
-          print("  Class C")
-          print("  Class D")
-          print("  Class E")
-          print("  Class F")
-          print("  Class G")
-          print("  P - Prohibited")
-          print("  R - Restricted")
-          print("  D - Danger")
-          print("  ATZ")
-          print("  MATZ")
-          print("  RMZ")
-          print("  TMZ")
+              if class_text in {
+                  "A", "B", "C", "D", "E", "F", "G"
+              }:
+                  return class_text
 
-          if not selected:
+              if class_text in {
+                  "CLASSA", "CLASSB", "CLASSC", "CLASSD",
+                  "CLASSE", "CLASSF", "CLASSG"
+              }:
+                  return class_text[-1]
 
-              print("")
-              print(
-                  "ERROR: Filter selected zero airspace features."
+              # Some NATS records expose the class in the airspace type.
+              type_text = re.sub(
+                  r"[^A-Z0-9]+",
+                  "",
+                  str(airspace_type or "").upper()
               )
 
-              sys.exit(1)
+              if type_text in {
+                  "CLASSA", "CLASSB", "CLASSC", "CLASSD",
+                  "CLASSE", "CLASSF", "CLASSG"
+              }:
+                  return type_text[-1]
 
+              return None
 
-          # ========================================================
-          # DEBUG SELECTED AIRSPACE
-          # ========================================================
+          tree = ET.parse(XML)
+          root = tree.getroot()
 
-          print("")
-          print("==========================================")
-          print("AIXM GEOMETRY DEBUG")
-          print("==========================================")
+          features = []
+          raw_airspaces = 0
+          geometry_count = 0
 
-          for index, item in enumerate(
-              selected[:5],
-              1
-          ):
+          for airspace in root.iter():
+              if local(airspace.tag) != "Airspace":
+                  continue
 
-              (
+              raw_airspaces += 1
+
+              designator = text_of(
                   airspace,
-                  timeslice,
-                  designator,
+                  {"designator", "AirspaceDesignator"}
+              )
+
+              name = text_of(
+                  airspace,
+                  {"name", "AirspaceName"}
+              )
+
+              # NATS/AIXM can expose the useful subtype in different
+              # nested fields. Keep all candidate values so the classifier
+              # can reliably identify MATZ/RMZ/TMZ/ATZ and P/R/D areas.
+              airspace_type = " ".join(
+                  all_text(
+                      airspace,
+                      {"type", "AirspaceType", "localType", "AirspaceLocalType"}
+                  )
+              )
+
+              icao_class = " ".join(
+                  all_text(
+                      airspace,
+                      {"class", "AirspaceClassification"}
+                  )
+              )
+
+              category = classify(
+                  airspace_type,
+                  icao_class,
                   name,
-                  air_type,
-                  local_type,
-                  classification,
-                  category,
-                  category_name,
-                  boundary
-              ) = item
-
-              components = geometry_components(
-                  timeslice
-              )
-
-              print("")
-              print(
-                  f"--- Selected Airspace {index} ---"
-              )
-
-              print(
-                  "Designator:",
                   designator
               )
 
-              print(
-                  "Name:",
-                  name
-              )
+              # Only retain the AviMap categories currently displayed.
+              # NOTAM airspace and all other NATS feature types are omitted.
+              if category is None:
+                  continue
 
-              print(
-                  "Type:",
-                  air_type
-              )
-
-              print(
-                  "Local type:",
-                  local_type
-              )
-
-              print(
-                  "Classification:",
-                  classification
-              )
-
-              print(
-                  "AviMap category:",
-                  category_name
-              )
-
-              print(
-                  "Geometry components:",
-                  len(components)
-              )
-
-
-          # ========================================================
-          # CONVERT SELECTED AIRSPACE
-          # ========================================================
-
-          features = []
-          failures = 0
-          failure_reasons = {}
-          categories = {}
-
-          for item in selected:
-
-              (
-                  airspace,
-                  timeslice,
-                  designator,
-                  name,
-                  air_type,
-                  local_type,
-                  classification,
-                  category,
-                  category_name,
-                  boundary
-              ) = item
-
-              try:
-
-                  (
-                      geometry,
-                      component_count,
-                      operations
-                  ) = airspace_geometry(
-                      timeslice
-                  )
-
-              except Exception as exc:
-
-                  geometry = None
-                  component_count = 0
-                  operations = []
-
-                  reason = (
-                      f"exception:{type(exc).__name__}"
-                  )
-
-                  failure_reasons[reason] = (
-                      failure_reasons.get(
-                          reason,
-                          0
-                      )
-                      + 1
-                  )
-
-                  if failures < 10:
-
-                      print("")
-                      print(
-                          "GEOMETRY EXCEPTION"
-                      )
-
-                      print(
-                          "Designator:",
-                          designator
-                      )
-
-                      print(
-                          "Name:",
-                          name
-                      )
-
-                      print(
-                          "Category:",
-                          category_name
-                      )
-
-                      print(
-                          "Exception:",
-                          repr(exc)
-                      )
+              geometry = geometry_from_airspace(airspace)
 
               if geometry is None:
-
-                  failures += 1
-
-                  failure_reasons[
-                      "no_geometry"
-                  ] = (
-                      failure_reasons.get(
-                          "no_geometry",
-                          0
-                      )
-                      + 1
-                  )
-
-                  if failures <= 10:
-
-                      print("")
-                      print(
-                          "GEOMETRY FAILURE"
-                      )
-
-                      print(
-                          "Designator:",
-                          designator
-                      )
-
-                      print(
-                          "Name:",
-                          name
-                      )
-
-                      print(
-                          "Category:",
-                          category_name
-                      )
-
-                      print(
-                          "Components:",
-                          component_count
-                      )
-
-                      print(
-                          "Operations:",
-                          operations
-                      )
-
                   continue
 
-              if geometry.is_empty:
+              geometry_count += 1
 
-                  failures += 1
+              props = {
+                  "name": name or designator or "Unknown airspace",
+                  "designator": designator,
+                  "aixmType": airspace_type,
+                  "icaoClass": icao_class,
+                  "category": category,
+                  "source": "NATS UK ICAO AIP Dataset"
+              }
 
-                  failure_reasons[
-                      "empty_geometry"
-                  ] = (
-                      failure_reasons.get(
-                          "empty_geometry",
-                          0
-                      )
-                      + 1
-                  )
+              # Preserve useful altitude/type text where available.
+              for key in (
+                  "upperLimit", "lowerLimit", "upperLimitReference",
+                  "lowerLimitReference", "verticalExtent"
+              ):
+                  value = text_of(airspace, {key})
+                  if value:
+                      props[key] = value
 
-                  continue
+              features.append({
+                  "type": "Feature",
+                  "id": designator or f"NATS-AIRSPACE-{len(features)+1}",
+                  "properties": props,
+                  "geometry": geometry
+              })
 
-              categories[
-                  category_name
-              ] = (
-                  categories.get(
-                      category_name,
-                      0
-                  )
-                  + 1
+          print(f"NATS AIXM Airspace features: {raw_airspaces}")
+          print(f"NATS Airspace geometries:     {geometry_count}")
+          print(f"GeoJSON features created:     {len(features)}")
+
+          if not features:
+              raise SystemExit(
+                  "ERROR: NATS AIXM conversion produced zero filtered airspace geometries."
               )
-
-              if category_name in {
-                  "ATZ",
-                  "MATZ",
-                  "RMZ",
-                  "TMZ"
-              }:
-
-                  stroke = "purple"
-
-              elif category_name in {
-                  "P",
-                  "R",
-                  "D"
-              }:
-
-                  stroke = "red"
-
-              else:
-
-                  stroke = "blue"
-
-              features.append(
-                  {
-                      "type": "Feature",
-                      "geometry": mapping(
-                          geometry
-                      ),
-                      "properties": {
-                          "designator": designator,
-                          "name": name,
-                          "type": air_type or "",
-                          "localType": local_type or "",
-                          "classification": classification or "",
-                          "category": category_name,
-                          "colour": stroke,
-                          "boundary": boundary,
-                          "stroke": stroke,
-                          "lineStyle": boundary,
-                          "airspaceType": air_type or "",
-                          "airspaceClass": classification or "",
-                          "source": "NATS UK ICAO AIP Dataset",
-                          "airac": AIRAC
-                      }
-                  }
-              )
-
-
-          # ========================================================
-          # RESULT
-          # ========================================================
-
-          print("")
-          print("==========================================")
-          print("AIRSPACE CONVERSION RESULT")
-          print("==========================================")
-          print("")
-          print(
-              f"Source Airspace features: {len(airspaces)}"
-          )
-          print(
-              f"Selected by filter: {len(selected)}"
-          )
-          print(
-              f"Valid geometries: {len(features)}"
-          )
-          print(
-              f"Geometry failures: {failures}"
-          )
-
-          print("")
-          print("Categories:")
-
-          for category, count in sorted(
-              categories.items()
-          ):
-
-              print(
-                  f"  {category}: {count}"
-              )
-
-          print("")
-          print("Failure reasons:")
-
-          for reason, count in sorted(
-              failure_reasons.items()
-          ):
-
-              print(
-                  f"  {reason}: {count}"
-              )
-
-
-          # ========================================================
-          # SAFETY CHECK
-          # ========================================================
-
-          if len(features) == 0:
-
-              print("")
-              print(
-                  "ERROR: NATS AIP conversion produced "
-                  "zero valid airspace geometries."
-              )
-
-              print(
-                  "Existing GeoJSON has NOT been replaced."
-              )
-
-              sys.exit(1)
 
           if len(features) < 100:
-
-              print("")
-              print(
-                  "ERROR: Suspiciously small filtered "
-                  "airspace dataset."
+              raise SystemExit(
+                  f"ERROR: Suspiciously small filtered airspace dataset: {len(features)} features."
               )
 
-              print(
-                  f"Only {len(features)} geometries produced."
-              )
+          category_counts = {}
+          for feature in features:
+              category = feature["properties"].get("category", "UNKNOWN")
+              category_counts[category] = category_counts.get(category, 0) + 1
 
-              print(
-                  "Existing GeoJSON has NOT been replaced."
-              )
+          print("AviMap airspace categories:")
+          for category, count in sorted(category_counts.items()):
+              print(f"  {category}: {count}")
 
-              sys.exit(1)
-
-
-          # ========================================================
-          # WRITE GEOJSON
-          # ========================================================
-
-          collection = {
-              "type": "FeatureCollection",
-              "features": features
-          }
-
-          temporary = OUTPUT.with_suffix(
-              ".geojson.tmp"
-          )
-
-          temporary.write_text(
-              json.dumps(
-                  collection,
-                  ensure_ascii=False,
-                  separators=(
-                      ",",
-                      ":"
-                  )
-              ),
+          Path(OUT).write_text(
+              json.dumps({
+                  "type": "FeatureCollection",
+                  "features": features
+              }, separators=(",", ":")),
               encoding="utf-8"
           )
-
-          temporary.replace(
-              OUTPUT
-          )
-
-          print("")
-          print(
-              f"Written: {OUTPUT}"
-          )
-
-          print(
-              f"Features: {len(features)}"
-          )
-
           PY
 
-          test -s data/uk-airspace.geojson
-
       # ============================================================
-      # CONVERT NATS VRPs
+      # CONVERT NATS VRPS
       # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
-        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import csv
+          import json
+          import re
+          from pathlib import Path
+
+          raw = Path("/tmp/uk-vrps.csv").read_text(
+              encoding="utf-8-sig",
+              errors="replace"
+          )
+
+          try:
+              dialect = csv.Sniffer().sniff(
+                  raw[:8192],
+                  delimiters=",;\t"
+              )
+          except csv.Error:
+              dialect = csv.excel
+
+          rows = list(csv.DictReader(
+              raw.splitlines(),
+              dialect=dialect
+          ))
+
+          if not rows:
+              raise SystemExit("ERROR: NATS VRP CSV contains zero records.")
+
+          fields = list(rows[0].keys())
+
+          def norm(value):
+              return re.sub(r"[^a-z0-9]", "", str(value).strip().lower())
+
+          normalised = {
+              norm(field): field
+              for field in fields
+              if field
+          }
+
+          def find_field(*names):
+              for name in names:
+                  if norm(name) in normalised:
+                      return normalised[norm(name)]
+              for key, original in normalised.items():
+                  for name in names:
+                      n = norm(name)
+                      if n in key or key in n:
+                          return original
+              return None
+
+          name_field = find_field(
+              "VRP Name", "VRP", "Name", "Designator", "Identifier", "Point Name", "Point"
+          )
+          lat_field = find_field(
+              "Latitude", "Lat", "Latitude DD", "Latitude Decimal"
+          )
+          lon_field = find_field(
+              "Longitude", "Lon", "Long", "Longitude DD", "Longitude Decimal"
+          )
+
+          if not lat_field or not lon_field:
+              raise SystemExit(
+                  f"ERROR: Could not identify NATS VRP coordinate fields. Fields: {fields}"
+              )
+
+          def parse_coord(value, latitude):
+              if value is None:
+                  return None
+
+              text = str(value).strip().replace(",", ".")
+              if not text:
+                  return None
+
+              hemisphere = None
+              match = re.search(r"([NSEW])\s*$", text, flags=re.I)
+              if match:
+                  hemisphere = match.group(1).upper()
+                  text = text[:match.start()].strip()
+
+              try:
+                  number = float(text)
+                  limit = 90 if latitude else 180
+                  if -limit <= number <= limit:
+                      if hemisphere in ("S", "W"):
+                          number = -abs(number)
+                      elif hemisphere in ("N", "E"):
+                          number = abs(number)
+                      return number
+              except ValueError:
+                  pass
+
+              compact = (
+                  text.replace("°", "")
+                      .replace("'", "")
+                      .replace('"', "")
+                      .replace(" ", "")
+              )
+
+              if re.fullmatch(r"\d+(?:\.\d+)?", compact):
+                  try:
+                      if "." in compact:
+                          integer_part, decimal_part = compact.split(".", 1)
+                      else:
+                          integer_part, decimal_part = compact, ""
+
+                      if latitude:
+                          if len(integer_part) < 6:
+                              raise ValueError
+                          degrees = int(integer_part[:2])
+                          minutes = int(integer_part[2:4])
+                          seconds_text = integer_part[4:]
+                      else:
+                          if len(integer_part) < 7:
+                              raise ValueError
+                          degrees = int(integer_part[:3])
+                          minutes = int(integer_part[3:5])
+                          seconds_text = integer_part[5:]
+
+                      if decimal_part:
+                          seconds_text += "." + decimal_part
+
+                      seconds = float(seconds_text)
+                      limit = 90 if latitude else 180
+
+                      if degrees > limit or minutes >= 60 or seconds >= 60:
+                          raise ValueError
+
+                      result = degrees + minutes / 60 + seconds / 3600
+
+                      if hemisphere in ("S", "W"):
+                          result = -abs(result)
+                      elif hemisphere in ("N", "E"):
+                          result = abs(result)
+
+                      return result
+                  except (ValueError, IndexError):
+                      pass
+
+              return None
+
+          features = []
+          invalid = 0
+
+          for index, row in enumerate(rows, 1):
+              lat = parse_coord(row.get(lat_field), True)
+              lon = parse_coord(row.get(lon_field), False)
+
+              if lat is None or lon is None:
+                  invalid += 1
+                  continue
+
+              if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                  invalid += 1
+                  continue
+
+              name = str(row.get(name_field, "")).strip() if name_field else ""
+              name = name or f"VRP {index}"
+
+              props = {
+                  str(k).strip(): v
+                  for k, v in row.items()
+                  if k
+              }
+              props["name"] = name
+              props["ident"] = name
+              props["source"] = "NATS Visual Reference Points List"
+
+              features.append({
+                  "type": "Feature",
+                  "properties": props,
+                  "geometry": {
+                      "type": "Point",
+                      "coordinates": [lon, lat]
+                  }
+              })
+
+          print("==========================================")
+          print("NATS VRP CONVERSION")
+          print("==========================================")
+          print(f"CSV records:         {len(rows)}")
+          print(f"Valid VRPs:          {len(features)}")
+          print(f"Invalid coordinates: {invalid}")
+
+          if not features:
+              raise SystemExit(
+                  "ERROR: NATS VRP conversion produced zero features. Existing repository data will NOT be replaced."
+              )
+
+          Path("/tmp/avimap-data/uk-reporting-points.geojson").write_text(
+              json.dumps({
+                  "type": "FeatureCollection",
+                  "features": features
+              }, separators=(",", ":")),
+              encoding="utf-8"
+          )
+          PY
+
+      # ============================================================
+      # VALIDATE BEFORE TOUCHING REPOSITORY DATA
+      # ============================================================
+
+      - name: Validate generated NATS data
+        run: |
+          set -euo pipefail
+
+          AIRSPACE_COUNT=$(jq '.features | length' /tmp/avimap-data/uk-airspace.geojson)
+          VRP_COUNT=$(jq '.features | length' /tmp/avimap-data/uk-reporting-points.geojson)
+
+          echo "=========================================="
+          echo "FINAL NATS DATA COUNTS"
+          echo "=========================================="
+          echo "Airspaces : ${AIRSPACE_COUNT}"
+          echo "VRPs      : ${VRP_COUNT}"
+
+          test "${AIRSPACE_COUNT}" -gt 0
+          test "${VRP_COUNT}" -gt 0
+
+          echo "Validation successful."
+
+      # ============================================================
+      # INSTALL ONLY VALIDATED DATA
+      # ============================================================
+
+      - name: Install validated aviation data
         run: |
           set -euo pipefail
 
           mkdir -p data
 
-          python3 <<'PY'
-          from pathlib import Path
-          import csv
-          import json
-          import re
-          import sys
-
-          VRP_ROOT = Path(
-              "/tmp/nats-vrp"
-          )
-
-          OUTPUT = Path(
-              "data/uk-reporting-points.geojson"
-          )
-
-          csv_files = list(
-              VRP_ROOT.rglob("*.csv")
-          )
-
-          if not csv_files:
-
-              print(
-                  "ERROR: No NATS VRP CSV found."
-              )
-
-              sys.exit(1)
-
-          csv_file = csv_files[0]
-
-          print("")
-          print("==========================================")
-          print("NATS VRP CONVERSION")
-          print("==========================================")
-          print("")
-          print(
-              "CSV:",
-              csv_file
-          )
-
-
-          def normalise_key(value):
-              return re.sub(
-                  r"[^a-z0-9]",
-                  "",
-                  value.lower()
-              )
-
-
-          def find_column(
-              headers,
-              candidates
-          ):
-              normalised = {
-                  normalise_key(header): header
-                  for header in headers
-              }
-
-              for candidate in candidates:
-
-                  key = normalise_key(
-                      candidate
-                  )
-
-                  if key in normalised:
-                      return normalised[key]
-
-              return None
-
-
-          def parse_coordinate(
-              value,
-              latitude
-          ):
-              if value is None:
-                  return None
-
-              value = str(
-                  value
-              ).strip().upper()
-
-              if not value:
-                  return None
-
-              try:
-
-                  number = float(value)
-
-                  if latitude:
-
-                      if -90 <= number <= 90:
-                          return number
-
-                  else:
-
-                      if -180 <= number <= 180:
-                          return number
-
-              except ValueError:
-                  pass
-
-              match = re.fullmatch(
-                  r"(\d+)([NSEW])",
-                  value
-              )
-
-              if not match:
-                  return None
-
-              digits = match.group(1)
-              hemisphere = match.group(2)
-
-              if latitude:
-
-                  if len(digits) != 6:
-                      return None
-
-              else:
-
-                  if len(digits) != 7:
-                      return None
-
-              degrees = int(
-                  digits[:-4]
-              )
-
-              minutes = int(
-                  digits[-4:-2]
-              )
-
-              seconds = int(
-                  digits[-2:]
-              )
-
-              if minutes >= 60:
-                  return None
-
-              if seconds >= 60:
-                  return None
-
-              result = (
-                  degrees
-                  +
-                  minutes / 60.0
-                  +
-                  seconds / 3600.0
-              )
-
-              if hemisphere in {
-                  "S",
-                  "W"
-              }:
-
-                  result = -result
-
-              return result
-
-
-          with csv_file.open(
-              "r",
-              encoding="utf-8-sig",
-              errors="replace",
-              newline=""
-          ) as handle:
-
-              reader = csv.DictReader(
-                  handle
-              )
-
-              headers = reader.fieldnames or []
-
-              print("")
-              print("CSV fields:")
-
-              for header in headers:
-                  print(
-                      f"  {header}"
-                  )
-
-              name_column = find_column(
-                  headers,
-                  [
-                      "VRP name",
-                      "VRP Name",
-                      "Name",
-                      "VRP"
-                  ]
-              )
-
-              lat_column = find_column(
-                  headers,
-                  [
-                      "Latitude",
-                      "Lat"
-                  ]
-              )
-
-              lon_column = find_column(
-                  headers,
-                  [
-                      "Longitude",
-                      "Long",
-                      "Lon"
-                  ]
-              )
-
-              aerodrome_column = find_column(
-                  headers,
-                  [
-                      "Associated Aerodrome",
-                      "Aerodrome"
-                  ]
-              )
-
-              icao_column = find_column(
-                  headers,
-                  [
-                      "ICAO Code",
-                      "ICAO"
-                  ]
-              )
-
-              valid_from_column = find_column(
-                  headers,
-                  [
-                      "Valid From",
-                      "ValidFrom"
-                  ]
-              )
-
-              print("")
-              print("Detected fields:")
-              print(
-                  "  Name:",
-                  name_column
-              )
-              print(
-                  "  Latitude:",
-                  lat_column
-              )
-              print(
-                  "  Longitude:",
-                  lon_column
-              )
-
-              if not lat_column or not lon_column:
-
-                  print(
-                      "ERROR: Could not identify "
-                      "latitude/longitude columns."
-                  )
-
-                  sys.exit(1)
-
-              features = []
-              invalid = 0
-
-              for row in reader:
-
-                  latitude = parse_coordinate(
-                      row.get(
-                          lat_column,
-                          ""
-                      ),
-                      True
-                  )
-
-                  longitude = parse_coordinate(
-                      row.get(
-                          lon_column,
-                          ""
-                      ),
-                      False
-                  )
-
-                  if (
-                      latitude is None
-                      or
-                      longitude is None
-                  ):
-
-                      invalid += 1
-                      continue
-
-                  name = (
-                      row.get(
-                          name_column,
-                          ""
-                      ).strip()
-                      if name_column
-                      else ""
-                  )
-
-                  aerodrome = (
-                      row.get(
-                          aerodrome_column,
-                          ""
-                      ).strip()
-                      if aerodrome_column
-                      else ""
-                  )
-
-                  icao = (
-                      row.get(
-                          icao_column,
-                          ""
-                      ).strip()
-                      if icao_column
-                      else ""
-                  )
-
-                  valid_from = (
-                      row.get(
-                          valid_from_column,
-                          ""
-                      ).strip()
-                      if valid_from_column
-                      else ""
-                  )
-
-                  features.append(
-                      {
-                          "type": "Feature",
-                          "geometry": {
-                              "type": "Point",
-                              "coordinates": [
-                                  longitude,
-                                  latitude
-                              ]
-                          },
-                          "properties": {
-                              "name": name,
-                              "designator": name,
-                              "associatedAerodrome": aerodrome,
-                              "icao": icao,
-                              "validFrom": valid_from,
-                              "category": "VRP",
-                              "colour": "purple",
-                              "boundary": "dashed",
-                              "source": (
-                                  "NATS Visual Reference "
-                                  "Points Dataset"
-                              )
-                          }
-                      }
-                  )
-
-
-          print("")
-          print("==========================================")
-          print("VRP CONVERSION RESULT")
-          print("==========================================")
-          print("")
-          print(
-              f"Valid VRPs: {len(features)}"
-          )
-          print(
-              f"Invalid records: {invalid}"
-          )
-
-          if not features:
-
-              print(
-                  "ERROR: VRP conversion produced "
-                  "zero valid points."
-              )
-
-              sys.exit(1)
-
-          collection = {
-              "type": "FeatureCollection",
-              "features": features
-          }
-
-          temporary = OUTPUT.with_suffix(
-              ".geojson.tmp"
-          )
-
-          temporary.write_text(
-              json.dumps(
-                  collection,
-                  ensure_ascii=False,
-                  separators=(
-                      ",",
-                      ":"
-                  )
-              ),
-              encoding="utf-8"
-          )
-
-          temporary.replace(
-              OUTPUT
-          )
-
-          print("")
-          print(
-              f"Written: {OUTPUT}"
-          )
-
-          print(
-              f"Features: {len(features)}"
-          )
-
-          PY
-
-          test -s data/uk-reporting-points.geojson
+          cp /tmp/avimap-data/uk-airspace.geojson data/uk-airspace.geojson
+          cp /tmp/avimap-data/uk-reporting-points.geojson data/uk-reporting-points.geojson
 
       # ============================================================
-      # VALIDATE BOTH DATASETS
+      # COMMIT ONLY IF CHANGED
       # ============================================================
 
-      - name: Validate generated aviation GeoJSON
-        shell: bash
+      - name: Commit updated NATS aviation data
         run: |
           set -euo pipefail
 
-          python3 <<'PY'
-          from pathlib import Path
-          import json
-          import sys
-
-          files = [
-              Path(
-                  "data/uk-airspace.geojson"
-              ),
-              Path(
-                  "data/uk-reporting-points.geojson"
-              )
-          ]
-
-          for path in files:
-
-              print("")
-              print(
-                  "Validating:",
-                  path
-              )
-
-              if not path.exists():
-                  print(
-                      "ERROR: File does not exist."
-                  )
-                  sys.exit(1)
-
-              try:
-
-                  data = json.loads(
-                      path.read_text(
-                          encoding="utf-8"
-                      )
-                  )
-
-              except Exception as exc:
-
-                  print(
-                      "ERROR: Invalid JSON:",
-                      exc
-                  )
-
-                  sys.exit(1)
-
-              if data.get(
-                  "type"
-              ) != "FeatureCollection":
-
-                  print(
-                      "ERROR: Not a FeatureCollection."
-                  )
-
-                  sys.exit(1)
-
-              features = data.get(
-                  "features"
-              )
-
-              if not isinstance(
-                  features,
-                  list
-              ):
-
-                  print(
-                      "ERROR: features is not a list."
-                  )
-
-                  sys.exit(1)
-
-              if not features:
-
-                  print(
-                      "ERROR: FeatureCollection is empty."
-                  )
-
-                  sys.exit(1)
-
-              for feature in features:
-
-                  if feature.get(
-                      "type"
-                  ) != "Feature":
-
-                      print(
-                          "ERROR: Invalid Feature."
-                      )
-
-                      sys.exit(1)
-
-                  if not feature.get(
-                      "geometry"
-                  ):
-
-                      print(
-                          "ERROR: Feature has no geometry."
-                      )
-
-                      sys.exit(1)
-
-              print(
-                  f"Valid features: {len(features)}"
-              )
-
-          print("")
-          print(
-              "All generated GeoJSON passed validation."
-          )
-          PY
-
-      # ============================================================
-      # FINAL SUMMARY
-      # ============================================================
-
-      - name: Show aviation data summary
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 <<'PY'
-          from pathlib import Path
-          import json
-
-          airspace = json.loads(
-              Path(
-                  "data/uk-airspace.geojson"
-              ).read_text(
-                  encoding="utf-8"
-              )
-          )
-
-          vrps = json.loads(
-              Path(
-                  "data/uk-reporting-points.geojson"
-              ).read_text(
-                  encoding="utf-8"
-              )
-          )
-
-          print("")
-          print("==========================================")
-          print("AVIATION DATA SUMMARY")
-          print("==========================================")
-          print("")
-
-          print(
-              "NATS AIRAC:",
-              Path(
-                  "/tmp/nats-aip-date.txt"
-              ).read_text().strip()
-          )
-
-          print(
-              "Airspace features:",
-              len(
-                  airspace["features"]
-              )
-          )
-
-          print(
-              "VRP features:",
-              len(
-                  vrps["features"]
-              )
-          )
-
-          categories = {}
-
-          for feature in airspace["features"]:
-
-              category = feature.get(
-                  "properties",
-                  {}
-              ).get(
-                  "category",
-                  "UNKNOWN"
-              )
-
-              categories[category] = (
-                  categories.get(
-                      category,
-                      0
-                  )
-                  + 1
-              )
-
-          print("")
-          print("Airspace categories:")
-
-          for category, count in sorted(
-              categories.items()
-          ):
-
-              print(
-                  f"  {category}: {count}"
-              )
-
-          PY
-
-      # ============================================================
-      # COMMIT
-      # ============================================================
-
-      - name: Commit updated aviation data
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          AIRAC=$(cat /tmp/nats-aip-date.txt)
-
-          echo ""
-          echo "=========================================="
-          echo "Preparing aviation data commit"
-          echo "=========================================="
-          echo ""
-          echo "NATS AIRAC:"
-          echo "$AIRAC"
-
-          git config user.name \
-            "github-actions[bot]"
-
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "AviMap Data Bot"
+          git config user.email "actions@users.noreply.github.com"
 
           git add \
             data/uk-airspace.geojson \
             data/uk-reporting-points.geojson
 
-          if git diff \
-            --cached \
-            --quiet; then
-
-            echo ""
-            echo "No aviation data changes detected."
+          if git diff --cached --quiet; then
+            echo "No aviation-data changes detected."
             exit 0
-
           fi
 
-          echo ""
-          echo "Changes:"
-          git diff \
-            --cached \
-            --stat
+          git diff --cached --stat
 
-          git commit \
-            -m "Update NATS aviation data ${AIRAC}"
-
+          git commit -m "Update UK aviation data from NATS AIS"
           git push
-
-          echo ""
-          echo "=========================================="
-          echo "AVIATION DATA UPDATED"
-          echo "=========================================="
-          echo ""
-          echo "AIRAC:"
-          echo "$AIRAC"
-          echo ""
-          echo "Filtered NATS airspace and VRP data committed."
