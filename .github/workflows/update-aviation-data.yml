@@ -1,0 +1,57 @@
+name: Update UK aviation data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 3 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download UK airspace
+        run: |
+          mkdir -p data
+
+          curl -fL --retry 3 \
+            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.geojson" \
+            -o data/uk-airspace.geojson
+
+          node - <<'NODE'
+          const fs = require("fs");
+
+          const file = "data/uk-airspace.geojson";
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          if (
+            !data ||
+            data.type !== "FeatureCollection" ||
+            !Array.isArray(data.features) ||
+            data.features.length === 0
+          ) {
+            throw new Error("Airspace file contains zero features");
+          }
+
+          console.log(`Downloaded ${data.features.length} airspace features`);
+          NODE
+
+      - name: Commit updated airspace
+        run: |
+          git config user.name "AviMap Data Bot"
+          git config user.email "actions@users.noreply.github.com"
+
+          git add data/uk-airspace.geojson
+
+          if git diff --cached --quiet; then
+            echo "No airspace data changes."
+          else
+            git commit -m "Update UK airspace data"
+            git push
+          fi
