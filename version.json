@@ -1,6 +1,6 @@
 {
-  "version": "1.0.15",
+  "version": "1.0.16",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Replaced the aircraft marker with the supplied yellow aviation silhouette."
+  "releaseNotes": "Removed the previous aircraft sprite completely. The supplied yellow aircraft silhouette is now the only aircraft marker asset."
 }

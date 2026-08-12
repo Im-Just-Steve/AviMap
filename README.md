@@ -321,3 +321,10 @@ map.
 The aircraft marker now uses the supplied yellow aircraft silhouette with a
 black outline and transparent background. The marker is kept as a local asset
 and continues to rotate with the live aircraft heading.
+
+
+## v1.0.16 aircraft marker
+
+The previous aircraft sprite has been removed from the project. The supplied
+yellow aircraft silhouette is now the only aircraft marker asset:
+`assets/aircraft-marker.png`.
