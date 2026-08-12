@@ -290,26 +290,16 @@ jobs:
 
 
           html = open(
-
               "/tmp/nats.html",
-
               encoding="utf-8",
-
               errors="replace"
-
           ).read()
 
 
-          # Find all links to NATS VRP ZIP datasets.
-
           hrefs = re.findall(
-
               r'href=["\']([^"\']+)["\']',
-
               html,
-
               flags=re.I
-
           )
 
 
@@ -319,18 +309,12 @@ jobs:
           for href in hrefs:
 
               match = re.search(
-
                   r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
-
                   href,
-
                   flags=re.I
-
               )
 
-
               if not match:
-
                   continue
 
 
@@ -340,11 +324,8 @@ jobs:
               try:
 
                   effective_date = datetime.strptime(
-
                       date_text,
-
                       "%Y%m%d"
-
                   ).date()
 
               except ValueError:
@@ -353,12 +334,10 @@ jobs:
 
 
               datasets.append(
-
                   (
                       effective_date,
                       href
                   )
-
               )
 
 
@@ -369,7 +348,6 @@ jobs:
               )
 
               print("")
-
               print(
                   "VRP links found:"
               )
@@ -391,7 +369,6 @@ jobs:
 
 
           print("")
-
           print(
               "Available NATS VRP datasets:"
           )
@@ -411,41 +388,25 @@ jobs:
               )
 
 
-          # Select the latest dataset whose effective date
-          # is not in the future.
-
           current = [
-
               item
-
               for item in datasets
-
               if item[0] <= today
-
           ]
 
 
           if current:
 
               effective_date, href = max(
-
                   current,
-
                   key=lambda item: item[0]
-
               )
 
           else:
 
-              # Safety fallback if NATS only publishes
-              # future datasets.
-
               effective_date, href = min(
-
                   datasets,
-
                   key=lambda item: item[0]
-
               )
 
 
@@ -459,7 +420,6 @@ jobs:
 
 
           print("")
-
           print(
               "=========================================="
           )
@@ -488,20 +448,14 @@ jobs:
 
 
           open(
-
               "/tmp/nats-vrp-url.txt",
-
               "w"
-
           ).write(url)
 
 
           open(
-
               "/tmp/nats-vrp-date.txt",
-
               "w"
-
           ).write(
               str(effective_date)
           )
@@ -524,10 +478,8 @@ jobs:
           echo "=========================================="
 
           echo ""
-
           echo "URL:"
           echo "$VRP_URL"
-
           echo ""
 
           mkdir -p /tmp/nats-vrp
@@ -554,21 +506,18 @@ jobs:
 
 
           echo ""
-
           echo "Downloaded ZIP:"
 
           ls -lh /tmp/nats-vrp.zip
 
 
           echo ""
-
           echo "ZIP contents:"
 
           unzip -l /tmp/nats-vrp.zip
 
 
           echo ""
-
           echo "Extracting..."
 
           unzip \
@@ -578,7 +527,6 @@ jobs:
 
 
           echo ""
-
           echo "Extracted files:"
 
           find \
@@ -586,8 +534,6 @@ jobs:
             -type f \
             -print
 
-
-          # Find the CSV contained inside the ZIP.
 
           VRP_CSV=$(find \
             /tmp/nats-vrp \
@@ -603,7 +549,6 @@ jobs:
           if [ -z "$VRP_CSV" ]; then
 
             echo ""
-
             echo "ERROR: No CSV file found inside NATS VRP ZIP."
 
             exit 1
@@ -612,7 +557,6 @@ jobs:
 
 
           echo ""
-
           echo "Selected VRP CSV:"
 
           echo "$VRP_CSV"
@@ -624,14 +568,12 @@ jobs:
 
 
           echo ""
-
           echo "CSV size:"
 
           wc -c /tmp/uk-vrps.csv
 
 
           echo ""
-
           echo "First 10 lines:"
 
           head \
@@ -650,35 +592,29 @@ jobs:
           python3 <<'PY'
 
           import csv
-
           import json
-
           import re
 
           from pathlib import Path
 
 
+          # --------------------------------------------------------
+          # READ CSV
+          # --------------------------------------------------------
+
           raw = Path(
-
               "/tmp/uk-vrps.csv"
-
           ).read_text(
-
               encoding="utf-8-sig",
-
               errors="replace"
-
           )
 
 
           try:
 
               dialect = csv.Sniffer().sniff(
-
                   raw[:8192],
-
                   delimiters=",;\t"
-
               )
 
           except csv.Error:
@@ -687,15 +623,10 @@ jobs:
 
 
           rows = list(
-
               csv.DictReader(
-
                   raw.splitlines(),
-
                   dialect=dialect
-
               )
-
           )
 
 
@@ -717,7 +648,6 @@ jobs:
 
 
           print("")
-
           print("CSV fields:")
 
 
@@ -728,16 +658,30 @@ jobs:
               )
 
 
+          # --------------------------------------------------------
+          # SHOW RAW RECORDS FOR DIAGNOSTICS
+          # --------------------------------------------------------
+
+          print("")
+          print("FIRST 5 RAW VRP RECORDS:")
+
+          for row in rows[:5]:
+
+              print(row)
+
+          print("")
+
+
+          # --------------------------------------------------------
+          # NORMALISE FIELD NAMES
+          # --------------------------------------------------------
+
           def norm(value):
 
               return re.sub(
-
                   r"[^a-z0-9]",
-
                   "",
-
                   str(value).strip().lower()
-
               )
 
 
@@ -783,17 +727,11 @@ jobs:
           name_field = find_field(
 
               "VRP Name",
-
               "VRP",
-
               "Name",
-
               "Designator",
-
               "Identifier",
-
               "Point Name",
-
               "Point"
 
           )
@@ -802,11 +740,8 @@ jobs:
           lat_field = find_field(
 
               "Latitude",
-
               "Lat",
-
               "Latitude DD",
-
               "Latitude Decimal"
 
           )
@@ -815,19 +750,13 @@ jobs:
           lon_field = find_field(
 
               "Longitude",
-
               "Lon",
-
               "Long",
-
               "Longitude DD",
-
               "Longitude Decimal"
 
           )
 
-
-          print("")
 
           print("Detected fields:")
 
@@ -859,10 +788,24 @@ jobs:
               )
 
 
-          def parse_coord(
-              value,
-              latitude
-          ):
+          # --------------------------------------------------------
+          # COORDINATE PARSER
+          #
+          # NATS uses compact:
+          #
+          # Latitude:
+          #   DDMMSS
+          #
+          # Longitude:
+          #   DDDMMSS
+          #
+          # Hemisphere letters may be present.
+          #
+          # We also support ordinary decimal degrees and
+          # conventional DMS formats.
+          # --------------------------------------------------------
+
+          def parse_coord(value, latitude):
 
               if value is None:
 
@@ -879,19 +822,55 @@ jobs:
                   return None
 
 
+              text = text.replace(
+                  ",",
+                  "."
+              )
+
+
               # ------------------------------------------------
-              # Decimal degrees
+              # Extract hemisphere.
+              #
+              # Handles:
+              #
+              # 512345N
+              # 0012345W
+              # 51 23 45 N
+              # ------------------------------------------------
+
+              hemisphere = None
+
+
+              match = re.search(
+                  r"([NSEW])\s*$",
+                  text,
+                  flags=re.I
+              )
+
+
+              if match:
+
+                  hemisphere = (
+                      match.group(1)
+                      .upper()
+                  )
+
+                  text = text[
+                      :match.start()
+                  ].strip()
+
+
+              # ------------------------------------------------
+              # Try ordinary decimal degrees first.
+              #
+              # Only accept values already inside the normal
+              # geographic range.
               # ------------------------------------------------
 
               try:
 
                   number = float(
-
-                      text.replace(
-                          ",",
-                          "."
-                      )
-
+                      text
                   )
 
 
@@ -908,8 +887,25 @@ jobs:
                       <= limit
                   ):
 
-                      return number
+                      if hemisphere in (
+                          "S",
+                          "W"
+                      ):
 
+                          number = -abs(
+                              number
+                          )
+
+                      elif hemisphere in (
+                          "N",
+                          "E"
+                      ):
+
+                          number = abs(
+                              number
+                          )
+
+                      return number
 
               except ValueError:
 
@@ -917,117 +913,326 @@ jobs:
 
 
               # ------------------------------------------------
-              # DMS / DDM
+              # Remove DMS separators.
               # ------------------------------------------------
 
-              upper = (
+              compact = (
 
-                  text.upper()
+                  text
 
                   .replace(
                       "°",
-                      " "
+                      ""
                   )
 
                   .replace(
                       "'",
-                      " "
+                      ""
                   )
 
                   .replace(
                       '"',
-                      " "
+                      ""
                   )
 
-              )
+                  .replace(
+                      " ",
+                      ""
+                  )
 
-
-              direction = None
-
-
-              if upper[-1:] in "NSEW":
-
-                  direction = upper[-1]
-
-                  upper = upper[:-1]
-
-
-              numbers = re.findall(
-
-                  r"[-+]?\d+(?:[.,]\d+)?",
-
-                  upper
+                  .strip()
 
               )
 
 
-              if not numbers:
+              # ------------------------------------------------
+              # Compact NATS DDMMSS / DDDMMSS.
+              #
+              # Decimal seconds are supported.
+              #
+              # Examples:
+              #
+              # 513012
+              # 513012.5
+              #
+              # 0003045
+              # 0003045.5
+              # ------------------------------------------------
 
-                  return None
+              if re.fullmatch(
+                  r"\d+(?:\.\d+)?",
+                  compact
+              ):
+
+                  try:
+
+                      if "." in compact:
+
+                          integer_part, decimal_part = (
+                              compact.split(
+                                  ".",
+                                  1
+                              )
+                          )
+
+                      else:
+
+                          integer_part = compact
+                          decimal_part = ""
 
 
-              values = [
+                      if latitude:
 
-                  float(
-                      n.replace(
-                          ",",
-                          "."
+                          # DDMMSS
+
+                          if len(
+                              integer_part
+                          ) < 6:
+
+                              raise ValueError
+
+
+                          degrees = int(
+                              integer_part[:2]
+                          )
+
+                          minutes = int(
+                              integer_part[2:4]
+                          )
+
+                          seconds_text = (
+                              integer_part[4:]
+                          )
+
+                      else:
+
+                          # DDDMMSS
+
+                          if len(
+                              integer_part
+                          ) < 7:
+
+                              raise ValueError
+
+
+                          degrees = int(
+                              integer_part[:3]
+                          )
+
+                          minutes = int(
+                              integer_part[3:5]
+                          )
+
+                          seconds_text = (
+                              integer_part[5:]
+                          )
+
+
+                      if decimal_part:
+
+                          seconds_text += (
+                              "."
+                              + decimal_part
+                          )
+
+
+                      seconds = float(
+                          seconds_text
                       )
+
+
+                      limit = (
+                          90
+                          if latitude
+                          else 180
+                      )
+
+
+                      if (
+                          degrees > limit
+                          or minutes >= 60
+                          or seconds >= 60
+                      ):
+
+                          raise ValueError
+
+
+                      result = (
+
+                          degrees
+
+                          + minutes / 60
+
+                          + seconds / 3600
+
+                      )
+
+
+                      # Apply explicit hemisphere.
+
+                      if hemisphere in (
+                          "S",
+                          "W"
+                      ):
+
+                          result = -abs(
+                              result
+                          )
+
+                      elif hemisphere in (
+                          "N",
+                          "E"
+                      ):
+
+                          result = abs(
+                              result
+                          )
+
+
+                      # If there is no hemisphere, preserve the
+                      # numeric sign rather than guessing.
+
+                      return result
+
+
+                  except (
+                      ValueError,
+                      IndexError
+                  ):
+
+                      pass
+
+
+              # ------------------------------------------------
+              # Conventional DMS / DDM fallback.
+              # ------------------------------------------------
+
+              try:
+
+                  numbers = re.findall(
+
+                      r"[-+]?\d+(?:\.\d+)?",
+
+                      text
+
                   )
 
-                  for n in numbers
 
-              ]
+                  if not numbers:
 
-
-              result = abs(
-                  values[0]
-              )
+                      return None
 
 
-              if len(values) > 1:
+                  values = [
 
-                  result += (
+                      float(number)
+
+                      for number in numbers
+
+                  ]
+
+
+                  degrees = abs(
+                      values[0]
+                  )
+
+
+                  minutes = (
+
                       abs(values[1])
-                      / 60
+
+                      if len(values) > 1
+
+                      else 0
+
                   )
 
 
-              if len(values) > 2:
+                  seconds = (
 
-                  result += (
                       abs(values[2])
-                      / 3600
+
+                      if len(values) > 2
+
+                      else 0
+
                   )
 
 
-              if direction in (
-                  "S",
-                  "W"
-              ):
+                  if (
+                      minutes >= 60
+                      or seconds >= 60
+                  ):
 
-                  result = -result
-
-
-              limit = (
-                  90
-                  if latitude
-                  else 180
-              )
+                      return None
 
 
-              if (
-                  result < -limit
-                  or result > limit
+                  result = (
+
+                      degrees
+
+                      + minutes / 60
+
+                      + seconds / 3600
+
+                  )
+
+
+                  if hemisphere in (
+                      "S",
+                      "W"
+                  ):
+
+                      result = -result
+
+                  elif hemisphere in (
+                      "N",
+                      "E"
+                  ):
+
+                      result = abs(
+                          result
+                      )
+
+                  elif values[0] < 0:
+
+                      result = -result
+
+
+                  limit = (
+                      90
+                      if latitude
+                      else 180
+                  )
+
+
+                  if not (
+                      -limit
+                      <= result
+                      <= limit
+                  ):
+
+                      return None
+
+
+                  return result
+
+
+              except (
+                  ValueError,
+                  IndexError
               ):
 
                   return None
 
 
-              return result
-
+          # --------------------------------------------------------
+          # CONVERT RECORDS
+          # --------------------------------------------------------
 
           features = []
+
+          invalid_coordinates = 0
 
 
           for index, row in enumerate(
@@ -1061,6 +1266,32 @@ jobs:
                   latitude is None
                   or longitude is None
               ):
+
+                  invalid_coordinates += 1
+
+                  continue
+
+
+              # Validate geographic ranges.
+
+              if not (
+                  -90
+                  <= latitude
+                  <= 90
+              ):
+
+                  invalid_coordinates += 1
+
+                  continue
+
+
+              if not (
+                  -180
+                  <= longitude
+                  <= 180
+              ):
+
+                  invalid_coordinates += 1
 
                   continue
 
@@ -1130,11 +1361,42 @@ jobs:
               })
 
 
+          # --------------------------------------------------------
+          # RESULT
+          # --------------------------------------------------------
+
           print("")
 
           print(
-              f"Valid VRPs: {len(features)}"
+              "=========================================="
           )
+
+          print(
+              "VRP CONVERSION RESULT"
+          )
+
+          print(
+              "=========================================="
+          )
+
+          print("")
+
+          print(
+              "CSV records:",
+              len(rows)
+          )
+
+          print(
+              "Valid VRPs:",
+              len(features)
+          )
+
+          print(
+              "Invalid coordinates:",
+              invalid_coordinates
+          )
+
+          print("")
 
 
           if not features:
@@ -1147,25 +1409,46 @@ jobs:
               )
 
 
+          # --------------------------------------------------------
+          # WRITE GEOJSON
+          # --------------------------------------------------------
+
+          output = {
+
+              "type":
+                  "FeatureCollection",
+
+              "features":
+                  features
+
+          }
+
+
           Path(
 
               "data/uk-reporting-points.geojson"
 
           ).write_text(
 
-              json.dumps({
-
-                  "type":
-                      "FeatureCollection",
-
-                  "features":
-                      features
-
-              }),
+              json.dumps(
+                  output,
+                  separators=(
+                      ",",
+                      ":"
+                  )
+              ),
 
               encoding="utf-8"
 
           )
+
+
+          print(
+              "Created:",
+              "data/uk-reporting-points.geojson"
+          )
+
+          print("")
 
           PY
 
