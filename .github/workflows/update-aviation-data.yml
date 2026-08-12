@@ -23,7 +23,7 @@ jobs:
 
 
       # ============================================================
-      # INSTALL PYTHON DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ============================================================
 
       - name: Install conversion dependencies
@@ -44,11 +44,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          NATS_URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
+
           echo "=========================================="
           echo "Downloading NATS Digital Datasets page"
           echo "=========================================="
-
-          NATS_URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
 
           curl \
             --fail \
@@ -64,7 +64,7 @@ jobs:
           test -s /tmp/nats.html
 
           echo ""
-          echo "NATS dataset page:"
+          echo "Downloaded NATS dataset page:"
           wc -c /tmp/nats.html
 
 
@@ -267,8 +267,6 @@ jobs:
 
       # ============================================================
       # LOCATE FULL NATS AIP XML
-      #
-      # NEVER fall back to DELTA.
       # ============================================================
 
       - name: Locate full NATS AIP XML
@@ -277,7 +275,6 @@ jobs:
           set -euo pipefail
 
           AIRAC=$(cat /tmp/nats-aip-date.txt)
-
           AIRAC_COMPACT="${AIRAC//-/}"
 
           EXPECTED="EG_AIP_DS_FULL_${AIRAC_COMPACT}.xml"
@@ -548,11 +545,10 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
           from lxml import etree
-          from shapely.geometry import Polygon, GeometryCollection, mapping
+          from shapely.geometry import Polygon, mapping
           from shapely.ops import unary_union
           from pyproj import Geod
           import json
-          import math
           import re
           import sys
 
@@ -613,7 +609,6 @@ jobs:
               )
 
               if gml_id:
-
                   id_index[gml_id] = element
 
           print(
@@ -626,10 +621,7 @@ jobs:
           # ========================================================
 
           def lname(element):
-
-              return etree.QName(
-                  element
-              ).localname
+              return etree.QName(element).localname
 
 
           def text(element):
@@ -640,9 +632,7 @@ jobs:
               return re.sub(
                   r"\s+",
                   " ",
-                  "".join(
-                      element.itertext()
-                  )
+                  "".join(element.itertext())
               ).strip()
 
 
@@ -655,9 +645,7 @@ jobs:
 
           def resolve(element):
 
-              value = href(
-                  element
-              )
+              value = href(element)
 
               if not value:
                   return element
@@ -670,10 +658,7 @@ jobs:
                   )[1]
 
                   if fragment in id_index:
-
-                      return id_index[
-                          fragment
-                      ]
+                      return id_index[fragment]
 
               return element
 
@@ -691,15 +676,10 @@ jobs:
 
               for child in matches:
 
-                  target = resolve(
-                      child
-                  )
+                  target = resolve(child)
 
                   if target is not None:
-
-                      result.append(
-                          target
-                      )
+                      result.append(target)
 
               return result
 
@@ -720,19 +700,215 @@ jobs:
                       child
                   ).lower() in wanted:
 
-                      value = text(
-                          child
-                      )
+                      value = text(child)
 
                       if value:
-
                           return value
 
               return ""
 
 
           # ========================================================
-          # COORDINATE READING
+          # AIRSPACE FILTER
+          #
+          # KEEP ONLY:
+          #
+          #   Class A-G
+          #   P
+          #   R
+          #   D
+          #   ATZ
+          #   MATZ
+          #   RMZ
+          #   TMZ
+          #
+          # EVERYTHING ELSE IS OMITTED.
+          #
+          # NOTAM AIRSPACE IS NOT INCLUDED HERE.
+          # ========================================================
+
+          ALLOWED_CLASSES = {
+              "A",
+              "B",
+              "C",
+              "D",
+              "E",
+              "F",
+              "G"
+          }
+
+          ALLOWED_SPECIAL_TYPES = {
+              "P",
+              "R",
+              "D",
+              "ATZ",
+              "MATZ",
+              "RMZ",
+              "TMZ"
+          }
+
+
+          def normalise_type(value):
+
+              return re.sub(
+                  r"[^A-Z0-9]",
+                  "",
+                  (value or "").upper()
+              )
+
+
+          def classify_airspace(
+              designator,
+              name,
+              air_type,
+              local_type,
+              classification
+          ):
+
+              designator = (
+                  designator or ""
+              ).strip().upper()
+
+              name = (
+                  name or ""
+              ).strip().upper()
+
+              air_type = normalise_type(
+                  air_type
+              )
+
+              local_type = normalise_type(
+                  local_type
+              )
+
+              classification = normalise_type(
+                  classification
+              )
+
+              # ----------------------------------------------------
+              # Explicit AIXM classification A-G
+              # ----------------------------------------------------
+
+              if classification in ALLOWED_CLASSES:
+
+                  return (
+                      True,
+                      classification,
+                      "CLASS_" + classification,
+                      "solid"
+                  )
+
+              # ----------------------------------------------------
+              # P / R / D
+              # ----------------------------------------------------
+
+              if air_type in {
+                  "P",
+                  "PROHIBITED"
+              }:
+
+                  return (
+                      True,
+                      "P",
+                      "PROHIBITED",
+                      "solid"
+                  )
+
+              if air_type in {
+                  "R",
+                  "RESTRICTED"
+              }:
+
+                  return (
+                      True,
+                      "R",
+                      "RESTRICTED",
+                      "solid"
+                  )
+
+              if air_type in {
+                  "D",
+                  "DANGER"
+              }:
+
+                  return (
+                      True,
+                      "D",
+                      "DANGER",
+                      "solid"
+                  )
+
+              # ----------------------------------------------------
+              # ATZ / MATZ / RMZ / TMZ
+              #
+              # Prefer explicit type/localType.
+              # Name/designator checks are only used where NATS
+              # doesn't expose the special-zone type directly.
+              # ----------------------------------------------------
+
+              special_values = {
+                  air_type,
+                  local_type,
+                  classification
+              }
+
+              for special in (
+                  "ATZ",
+                  "MATZ",
+                  "RMZ",
+                  "TMZ"
+              ):
+
+                  if special in special_values:
+
+                      return (
+                          True,
+                          special,
+                          special,
+                          "dashed"
+                      )
+
+              # ----------------------------------------------------
+              # Conservative fallback using complete tokens in
+              # designator/name only.
+              # ----------------------------------------------------
+
+              combined = " ".join(
+                  [
+                      designator,
+                      name
+                  ]
+              )
+
+              for special in (
+                  "MATZ",
+                  "ATZ",
+                  "RMZ",
+                  "TMZ"
+              ):
+
+                  if re.search(
+                      rf"(?<![A-Z0-9]){special}(?![A-Z0-9])",
+                      combined
+                  ):
+
+                      return (
+                          True,
+                          special,
+                          special,
+                          "dashed"
+                      )
+
+              return (
+                  False,
+                  None,
+                  None,
+                  None
+              )
+
+
+          # ========================================================
+          # COORDINATE HELPERS
           # ========================================================
 
           def numbers(value):
@@ -746,9 +922,7 @@ jobs:
               ]
 
 
-          def geometry_srs(
-              element
-          ):
+          def geometry_srs(element):
 
               current = element
 
@@ -759,7 +933,6 @@ jobs:
                   )
 
                   if value:
-
                       return value
 
                   current = current.getparent()
@@ -769,25 +942,19 @@ jobs:
               )
 
 
-          def is_lat_first(
-              srs
-          ):
+          def is_lat_first(srs):
 
               value = (
                   srs or ""
               ).upper()
 
-              if (
+              return (
                   "EPSG::4326" in value
                   or
                   "EPSG:4326" in value
                   or
                   "EPSG/0/4326" in value
-              ):
-
-                  return True
-
-              return False
+              )
 
 
           def position_pairs(
@@ -808,7 +975,6 @@ jobs:
                   )
 
                   if len(values) < 2:
-
                       return []
 
                   dimension = pos_list[0].get(
@@ -817,16 +983,17 @@ jobs:
 
                   try:
 
-                      dimension = int(
-                          dimension
-                      ) if dimension else 2
+                      dimension = (
+                          int(dimension)
+                          if dimension
+                          else 2
+                      )
 
                   except Exception:
 
                       dimension = 2
 
                   if dimension < 2:
-
                       dimension = 2
 
                   pairs = []
@@ -855,9 +1022,7 @@ jobs:
               for position in positions:
 
                   values = numbers(
-                      text(
-                          position
-                      )
+                      text(position)
                   )
 
                   if len(values) >= 2:
@@ -879,9 +1044,7 @@ jobs:
 
               first, second = pair
 
-              if is_lat_first(
-                  srs
-              ):
+              if is_lat_first(srs):
 
                   return (
                       second,
@@ -915,18 +1078,12 @@ jobs:
           # RADIUS
           # ========================================================
 
-          def radius_metres(
-              element
-          ):
-
-              value_text = text(
-                  element
-              )
+          def radius_metres(element):
 
               try:
 
                   value = float(
-                      value_text
+                      text(element)
                   )
 
               except Exception:
@@ -937,8 +1094,7 @@ jobs:
                   element.get(
                       "uom"
                   )
-                  or
-                  "m"
+                  or "m"
               ).strip().lower()
 
               if uom in {
@@ -960,9 +1116,9 @@ jobs:
                   return value * 1000.0
 
               if uom in {
-                  "[nmi_i]",
                   "nmi",
                   "nm",
+                  "[nmi_i]",
                   "nauticalmile",
                   "nauticalmiles"
               }:
@@ -977,25 +1133,15 @@ jobs:
 
                   return value * 0.3048
 
-              if uom in {
-                  "mi"
-              }:
+              if uom == "mi":
 
                   return value * 1609.344
-
-              print(
-                  f"WARNING: Unknown radius unit '{uom}', "
-                  "assuming metres."
-              )
 
               return value
 
 
           # ========================================================
-          # ARC GENERATION
-          #
-          # EPSG:4326 uses latitude first and AIXM angles are
-          # measured clockwise from North.
+          # ARC / CIRCLE
           # ========================================================
 
           def arc_points(
@@ -1016,9 +1162,7 @@ jobs:
 
                   for node in point_nodes:
 
-                      target = resolve(
-                          node
-                      )
+                      target = resolve(node)
 
                       centre_values = position_pairs(
                           target,
@@ -1026,11 +1170,9 @@ jobs:
                       )
 
                       if centre_values:
-
                           break
 
               if not centre_values:
-
                   return []
 
               centre = to_lon_lat(
@@ -1038,35 +1180,32 @@ jobs:
                   srs
               )
 
-              radius_node = segment.xpath(
+              radius_nodes = segment.xpath(
                   ".//*[local-name()='radius']"
               )
 
-              if not radius_node:
-
+              if not radius_nodes:
                   return []
 
               radius = radius_metres(
-                  radius_node[0]
+                  radius_nodes[0]
               )
 
               if radius is None:
-
                   return []
 
-              start_node = segment.xpath(
+              start_nodes = segment.xpath(
                   ".//*[local-name()='startAngle']"
               )
 
-              end_node = segment.xpath(
+              end_nodes = segment.xpath(
                   ".//*[local-name()='endAngle']"
               )
 
               # Full circle.
-              if not start_node or not end_node:
+              if not start_nodes or not end_nodes:
 
                   count = 96
-
                   result = []
 
                   for i in range(
@@ -1101,13 +1240,13 @@ jobs:
 
                   start = float(
                       text(
-                          start_node[0]
+                          start_nodes[0]
                       )
                   )
 
                   end = float(
                       text(
-                          end_node[0]
+                          end_nodes[0]
                       )
                   )
 
@@ -1116,37 +1255,22 @@ jobs:
                   return []
 
               difference = (
-                  end
-                  -
-                  start
+                  end - start
               )
 
               if abs(
                   difference
-              ) >= 360.0:
+              ) >= 360:
 
-                  return arc_points(
-                      segment,
-                      srs
-                  )
-
-              direction = 1.0
-
-              if difference < 0:
-
-                  direction = -1.0
+                  difference = 360
 
               steps = max(
                   4,
                   int(
                       abs(
                           difference
-                      )
-                      /
-                      3.0
-                  )
-                  +
-                  1
+                      ) / 3
+                  ) + 1
               )
 
               result = []
@@ -1156,17 +1280,13 @@ jobs:
               ):
 
                   fraction = (
-                      i
-                      /
-                      steps
+                      i / steps
                   )
 
                   angle = (
                       start
                       +
-                      difference
-                      *
-                      fraction
+                      difference * fraction
                   )
 
                   lon, lat, _ = geod.fwd(
@@ -1187,7 +1307,7 @@ jobs:
 
 
           # ========================================================
-          # CURVE SEGMENT
+          # CURVES
           # ========================================================
 
           def curve_segment_points(
@@ -1195,11 +1315,11 @@ jobs:
               srs
           ):
 
-              name = lname(
+              segment_name = lname(
                   segment
               ).lower()
 
-              if name in {
+              if segment_name in {
                   "geodesicstring",
                   "linestringsegment",
                   "linestring",
@@ -1211,44 +1331,21 @@ jobs:
                       srs
                   )
 
-              if name == "arcbycenterpoint":
+              if segment_name in {
+                  "arcbycenterpoint",
+                  "circlebycenterpoint"
+              }:
 
                   return arc_points(
                       segment,
                       srs
                   )
 
-              if name == "circlebycenterpoint":
-
-                  return arc_points(
-                      segment,
-                      srs
-                  )
-
-              if name == "arc":
-
-                  points = coordinates_from_element(
-                      segment,
-                      srs
-                  )
-
-                  # AIXM edge arcs are defined by points.
-                  # Connecting the encoded points preserves the
-                  # supplied boundary without inventing a curve.
-                  return points
-
-              # Try any nested coordinate geometry.
-              points = coordinates_from_element(
+              return coordinates_from_element(
                   segment,
                   srs
               )
 
-              return points
-
-
-          # ========================================================
-          # CURVE
-          # ========================================================
 
           def curve_points(
               curve,
@@ -1263,8 +1360,7 @@ jobs:
                   curve.get(
                       "srsName"
                   )
-                  or
-                  srs
+                  or srs
               )
 
               segments = curve.xpath(
@@ -1281,12 +1377,10 @@ jobs:
                   )
 
                   if not points:
-
                       continue
 
                   if result and points:
 
-                      # Avoid duplicating shared boundary point.
                       if (
                           abs(
                               result[-1][0]
@@ -1311,7 +1405,7 @@ jobs:
 
 
           # ========================================================
-          # RING
+          # RINGS
           # ========================================================
 
           def ring_points(
@@ -1323,7 +1417,6 @@ jobs:
                   ring
               )
 
-              # Simple LinearRing.
               linear_rings = ring.xpath(
                   ".//*[local-name()='LinearRing']"
               )
@@ -1336,10 +1429,8 @@ jobs:
                   )
 
                   if len(points) >= 3:
-
                       return points
 
-              # Curve-based Ring.
               members = ring.xpath(
                   "./*[local-name()='curveMember']"
               )
@@ -1360,8 +1451,7 @@ jobs:
                           lname(
                               target
                           ).lower()
-                          ==
-                          "curve"
+                          == "curve"
                       ):
 
                           curves.append(
@@ -1390,7 +1480,6 @@ jobs:
                       )
 
                       if not points:
-
                           continue
 
                       if result and points:
@@ -1438,17 +1527,16 @@ jobs:
                   )
 
               if not exterior:
-
                   return None
 
-              outer_rings = exterior[0].xpath(
+              linear_rings = exterior[0].xpath(
                   ".//*[local-name()='LinearRing']"
               )
 
-              if outer_rings:
+              if linear_rings:
 
                   outer = coordinates_from_element(
-                      outer_rings[0],
+                      linear_rings[0],
                       srs
                   )
 
@@ -1459,7 +1547,6 @@ jobs:
                   )
 
                   if not rings:
-
                       return None
 
                   outer = ring_points(
@@ -1468,11 +1555,9 @@ jobs:
                   )
 
               if len(outer) < 3:
-
                   return None
 
               if outer[0] != outer[-1]:
-
                   outer.append(
                       outer[0]
                   )
@@ -1503,7 +1588,6 @@ jobs:
                       )
 
                       if not rings:
-
                           continue
 
                       hole = ring_points(
@@ -1511,17 +1595,17 @@ jobs:
                           srs
                       )
 
-                  if len(hole) >= 3:
+                  if len(hole) < 3:
+                      continue
 
-                      if hole[0] != hole[-1]:
-
-                          hole.append(
-                              hole[0]
-                          )
-
-                      holes.append(
-                          hole
+                  if hole[0] != hole[-1]:
+                      hole.append(
+                          hole[0]
                       )
+
+                  holes.append(
+                      hole
+                  )
 
               try:
 
@@ -1535,7 +1619,6 @@ jobs:
                   return None
 
               if polygon.is_empty:
-
                   return None
 
               if not polygon.is_valid:
@@ -1545,7 +1628,6 @@ jobs:
                   )
 
               if polygon.is_empty:
-
                   return None
 
               return polygon
@@ -1587,7 +1669,6 @@ jobs:
                       )
 
               if not geometries:
-
                   return None
 
               try:
@@ -1634,7 +1715,6 @@ jobs:
 
               if not geometries:
 
-                  # Fallback for embedded Surface.
                   surfaces = volume.xpath(
                       ".//*[local-name()='Surface']"
                   )
@@ -1652,7 +1732,6 @@ jobs:
                           )
 
               if not geometries:
-
                   return None
 
               try:
@@ -1688,7 +1767,6 @@ jobs:
                       component
                   )
 
-              # Some datasets may embed components deeper.
               if not components:
 
                   components = timeslice.xpath(
@@ -1702,14 +1780,12 @@ jobs:
               component
           ):
 
-              value = first_text(
+              return first_text(
                   component,
                   [
                       "operation"
                   ]
               ).upper()
-
-              return value
 
 
           def component_sequence(
@@ -1724,13 +1800,8 @@ jobs:
               )
 
               try:
-
-                  return int(
-                      value
-                  )
-
+                  return int(value)
               except Exception:
-
                   return 999999
 
 
@@ -1744,7 +1815,6 @@ jobs:
               )
 
               if direct:
-
                   return direct[0]
 
               volumes = component.xpath(
@@ -1752,7 +1822,6 @@ jobs:
               )
 
               if volumes:
-
                   return resolve(
                       volumes[0]
                   )
@@ -1761,7 +1830,7 @@ jobs:
 
 
           # ========================================================
-          # AIRSPACE AGGREGATION
+          # AIRSPACE GEOMETRY
           # ========================================================
 
           def airspace_geometry(
@@ -1782,7 +1851,6 @@ jobs:
               )
 
               result = None
-
               operations = []
 
               for component in ordered:
@@ -1800,7 +1868,6 @@ jobs:
                   )
 
                   if volume is None:
-
                       continue
 
                   geometry = volume_geometry(
@@ -1808,7 +1875,6 @@ jobs:
                   )
 
                   if geometry is None:
-
                       continue
 
                   if result is None:
@@ -1848,7 +1914,6 @@ jobs:
 
                   else:
 
-                      # BASE / UNION / unknown.
                       try:
 
                           result = result.union(
@@ -1861,15 +1926,13 @@ jobs:
 
               return (
                   result,
-                  len(
-                      components
-                  ),
+                  len(components),
                   operations
               )
 
 
           # ========================================================
-          # FIND AIRSPACE FEATURES
+          # FIND ALL AIRSPACE FEATURES
           # ========================================================
 
           airspaces = root.xpath(
@@ -1881,28 +1944,22 @@ jobs:
               f"NATS Airspace features found: {len(airspaces)}"
           )
 
-          if not airspaces:
-
-              print(
-                  "ERROR: No Airspace features found."
-              )
-
-              sys.exit(1)
-
 
           # ========================================================
-          # DEBUG FIRST FIVE AIRSPACES
+          # FILTER FIRST
+          #
+          # This is deliberately before geometry conversion.
+          # We do not waste time parsing geometry for airspace
+          # categories that AviMap does not currently display.
           # ========================================================
 
-          print("")
-          print("==========================================")
-          print("AIXM GEOMETRY DEBUG")
-          print("==========================================")
+          selected_airspaces = []
 
-          for index, airspace in enumerate(
-              airspaces[:5],
-              1
-          ):
+          omitted_airspaces = 0
+          omitted_by_reason = {}
+
+
+          for airspace in airspaces:
 
               timeslices = airspace.xpath(
                   ".//*[local-name()='AirspaceTimeSlice']"
@@ -1925,8 +1982,220 @@ jobs:
                   timeslice,
                   [
                       "name"
+                  )
+
+              )
+
+              air_type = first_text(
+                  timeslice,
+                  [
+                      "type"
                   ]
               )
+
+              local_type = first_text(
+                  timeslice,
+                  [
+                      "localType"
+                  ]
+              )
+
+              classification = first_text(
+                  timeslice,
+                  [
+                      "classification"
+                  ]
+              )
+
+              keep, category, category_name, boundary = classify_airspace(
+                  designator,
+                  name,
+                  air_type,
+                  local_type,
+                  classification
+              )
+
+              if keep:
+
+                  selected_airspaces.append(
+                      (
+                          airspace,
+                          timeslice,
+                          designator,
+                          name,
+                          air_type,
+                          local_type,
+                          classification,
+                          category,
+                          category_name,
+                          boundary
+                      )
+                  )
+
+              else:
+
+                  omitted_airspaces += 1
+
+                  key = (
+                      normalise_type(
+                          air_type
+                      )
+                      or
+                      normalise_type(
+                          local_type
+                      )
+                      or
+                      normalise_type(
+                          classification
+                      )
+                      or
+                      "OTHER"
+                  )
+
+                  omitted_by_reason[
+                      key
+                  ] = omitted_by_reason.get(
+                      key,
+                      0
+                  ) + 1
+
+
+          print("")
+          print("==========================================")
+          print("AIRSPACE FILTER")
+          print("==========================================")
+          print("")
+
+          print(
+              "Source NATS airspace:",
+              len(airspaces)
+          )
+
+          print(
+              "Selected for AviMap:",
+              len(selected_airspaces)
+          )
+
+          print(
+              "Omitted:",
+              omitted_airspaces
+          )
+
+          print("")
+          print(
+              "Omitted type summary:"
+          )
+
+          for key, count in sorted(
+              omitted_by_reason.items()
+          ):
+
+              print(
+                  f"  {key}: {count}"
+              )
+
+          print("")
+          print(
+              "Allowed categories:"
+          )
+
+          print(
+              "  Class A"
+          )
+
+          print(
+              "  Class B"
+          )
+
+          print(
+              "  Class C"
+          )
+
+          print(
+              "  Class D"
+          )
+
+          print(
+              "  Class E"
+          )
+
+          print(
+              "  Class F"
+          )
+
+          print(
+              "  Class G"
+          )
+
+          print(
+              "  P - Prohibited"
+          )
+
+          print(
+              "  R - Restricted"
+          )
+
+          print(
+              "  D - Danger"
+          )
+
+          print(
+              "  ATZ"
+          )
+
+          print(
+              "  MATZ"
+          )
+
+          print(
+              "  RMZ"
+          )
+
+          print(
+              "  TMZ"
+          )
+
+
+          if not selected_airspaces:
+
+              print("")
+              print(
+                  "ERROR: Airspace filter selected zero features."
+              )
+
+              print(
+                  "Existing GeoJSON has NOT been replaced."
+              )
+
+              sys.exit(1)
+
+
+          # ========================================================
+          # DEBUG FIRST FIVE SELECTED FEATURES
+          # ========================================================
+
+          print("")
+          print("==========================================")
+          print("AIXM GEOMETRY DEBUG")
+          print("==========================================")
+
+          for index, item in enumerate(
+              selected_airspaces[:5],
+              1
+          ):
+
+              (
+                  airspace,
+                  timeslice,
+                  designator,
+                  name,
+                  air_type,
+                  local_type,
+                  classification,
+                  category,
+                  category_name,
+                  boundary
+              ) = item
 
               components = geometry_components(
                   timeslice
@@ -1934,7 +2203,7 @@ jobs:
 
               print("")
               print(
-                  f"--- Airspace {index} ---"
+                  f"--- Selected Airspace {index} ---"
               )
 
               print(
@@ -1945,6 +2214,26 @@ jobs:
               print(
                   "Name:",
                   name
+              )
+
+              print(
+                  "Type:",
+                  air_type
+              )
+
+              print(
+                  "Local type:",
+                  local_type
+              )
+
+              print(
+                  "Classification:",
+                  classification
+              )
+
+              print(
+                  "AviMap category:",
+                  category_name
               )
 
               print(
@@ -1996,19 +2285,10 @@ jobs:
 
                       print(
                           "    Horizontal surfaces:",
-                          len(
-                              surfaces
-                          )
+                          len(surfaces)
                       )
 
-                      for surface in surfaces[:3]:
-
-                          print(
-                              "      Surface CRS:",
-                              geometry_srs(
-                                  surface
-                              )
-                          )
+                      for surface in surfaces[:2]:
 
                           patches = surface.xpath(
                               ".//*[local-name()='PolygonPatch']"
@@ -2020,18 +2300,6 @@ jobs:
                           )
 
                           for patch in patches[:2]:
-
-                              print(
-                                  "      Ring types:",
-                                  [
-                                      lname(
-                                          child
-                                      )
-                                      for child in patch.xpath(
-                                          ".//*[local-name()='exterior']/*"
-                                      )
-                                  ]
-                              )
 
                               print(
                                   "      Curve segment types:",
@@ -2047,7 +2315,7 @@ jobs:
 
 
           # ========================================================
-          # CONVERT
+          # CONVERT SELECTED AIRSPACE
           # ========================================================
 
           features = []
@@ -2059,204 +2327,20 @@ jobs:
           categories = {}
 
 
-          def classify(
-              designator,
-              name,
-              air_type,
-              local_type,
-              classification
-          ):
+          for item in selected_airspaces:
 
-              combined = " ".join(
-                  [
-                      designator,
-                      name,
-                      air_type,
-                      local_type,
-                      classification
-                  ]
-              ).upper()
-
-              if (
-                  air_type == "P"
-                  or
-                  "PROHIBITED" in combined
-              ):
-
-                  return (
-                      "PROHIBITED",
-                      "red",
-                      "solid"
-                  )
-
-              if (
-                  air_type == "R"
-                  or
-                  "RESTRICTED" in combined
-              ):
-
-                  return (
-                      "RESTRICTED",
-                      "red",
-                      "solid"
-                  )
-
-              if (
-                  air_type == "D"
-                  or
-                  "DANGER" in combined
-              ):
-
-                  return (
-                      "DANGER",
-                      "red",
-                      "solid"
-                  )
-
-              if (
-                  classification == "A"
-                  or
-                  re.search(
-                      r"\bCLASS[\s_-]*A\b",
-                      combined
-                  )
-              ):
-
-                  return (
-                      "CLASS_A",
-                      "purple",
-                      "solid"
-                  )
-
-              if (
-                  air_type == "ATZ"
-                  or
-                  local_type == "ATZ"
-                  or
-                  "ATZ" in combined
-              ):
-
-                  return (
-                      "ATZ",
-                      "purple",
-                      "dashed"
-                  )
-
-              if (
-                  air_type == "TMZ"
-                  or
-                  local_type == "TMZ"
-                  or
-                  "TMZ" in combined
-              ):
-
-                  return (
-                      "TMZ",
-                      "purple",
-                      "dashed"
-                  )
-
-              if (
-                  air_type == "MATZ"
-                  or
-                  local_type == "MATZ"
-                  or
-                  "MATZ" in combined
-              ):
-
-                  return (
-                      "MATZ",
-                      "blue",
-                      "dashed"
-                  )
-
-              if (
-                  air_type == "RMZ"
-                  or
-                  local_type == "RMZ"
-                  or
-                  "RMZ" in combined
-              ):
-
-                  return (
-                      "RMZ",
-                      "blue",
-                      "dashed"
-                  )
-
-              if air_type in {
-                  "CTA",
-                  "CTR",
-                  "TMA",
-                  "TCA",
-                  "AWY",
-                  "SECTOR",
-                  "FIR",
-                  "UIR"
-              }:
-
-                  return (
-                      "CONTROLLED",
-                      "blue",
-                      "solid"
-                  )
-
-              return (
-                  "OTHER",
-                  "grey",
-                  "solid"
-              )
-
-
-          for index, airspace in enumerate(
-              airspaces,
-              1
-          ):
-
-              timeslices = airspace.xpath(
-                  ".//*[local-name()='AirspaceTimeSlice']"
-              )
-
-              timeslice = (
-                  timeslices[-1]
-                  if timeslices
-                  else airspace
-              )
-
-              designator = first_text(
+              (
+                  airspace,
                   timeslice,
-                  [
-                      "designator"
-                  ]
-              )
-
-              name = first_text(
-                  timeslice,
-                  [
-                      "name"
-                  ]
-              )
-
-              air_type = first_text(
-                  timeslice,
-                  [
-                      "type"
-                  ]
-              ).upper()
-
-              local_type = first_text(
-                  timeslice,
-                  [
-                      "localType"
-                  ]
-              ).upper()
-
-              classification = first_text(
-                  timeslice,
-                  [
-                      "classification"
-                  ]
-              ).upper()
+                  designator,
+                  name,
+                  air_type,
+                  local_type,
+                  classification,
+                  category,
+                  category_name,
+                  boundary
+              ) = item
 
               try:
 
@@ -2283,13 +2367,38 @@ jobs:
                       0
                   ) + 1
 
+                  if failures < 10:
+
+                      print("")
+                      print(
+                          "GEOMETRY EXCEPTION"
+                      )
+
+                      print(
+                          "Designator:",
+                          designator
+                      )
+
+                      print(
+                          "Name:",
+                          name
+                      )
+
+                      print(
+                          "Category:",
+                          category_name
+                      )
+
+                      print(
+                          "Exception:",
+                          repr(exc)
+                      )
+
               if geometry is None:
 
                   failures += 1
 
-                  reason = (
-                      "no_geometry"
-                  )
+                  reason = "no_geometry"
 
                   failure_reasons[
                       reason
@@ -2316,6 +2425,11 @@ jobs:
                       )
 
                       print(
+                          "Category:",
+                          category_name
+                      )
+
+                      print(
                           "Components:",
                           component_count
                       )
@@ -2331,9 +2445,7 @@ jobs:
 
                   failures += 1
 
-                  reason = (
-                      "empty_geometry"
-                  )
+                  reason = "empty_geometry"
 
                   failure_reasons[
                       reason
@@ -2344,50 +2456,93 @@ jobs:
 
                   continue
 
-              category, colour, boundary = classify(
-                  designator,
-                  name,
-                  air_type,
-                  local_type,
-                  classification
-              )
-
               categories[
-                  category
+                  category_name
               ] = categories.get(
-                  category,
+                  category_name,
                   0
               ) + 1
 
-              feature = {
-                  "type": "Feature",
-                  "geometry": mapping(
-                      geometry
-                  ),
-                  "properties": {
-                      "designator": designator,
-                      "name": name,
-                      "type": air_type,
-                      "localType": local_type,
-                      "classification": classification,
-
-                      "category": category,
-                      "colour": colour,
-                      "boundary": boundary,
-
-                      "stroke": colour,
-                      "lineStyle": boundary,
-
-                      "airspaceType": air_type,
-                      "airspaceClass": classification,
-
-                      "source": "NATS UK ICAO AIP Dataset",
-                      "airac": AIRAC
-                  }
-              }
-
               features.append(
-                  feature
+                  {
+                      "type": "Feature",
+                      "geometry": mapping(
+                          geometry
+                      ),
+                      "properties": {
+                          "designator": designator,
+                          "name": name,
+
+                          "type": (
+                              air_type or ""
+                          ),
+
+                          "localType": (
+                              local_type or ""
+                          ),
+
+                          "classification": (
+                              classification or ""
+                          ),
+
+                          "category": category_name,
+                          "colour": (
+                              "purple"
+                              if category_name in {
+                                  "ATZ",
+                                  "MATZ",
+                                  "RMZ",
+                                  "TMZ"
+                              }
+                              else
+                              "red"
+                              if category_name in {
+                                  "P",
+                                  "R",
+                                  "D"
+                              }
+                              else
+                              "blue"
+                          ),
+
+                          "boundary": boundary,
+
+                          "stroke": (
+                              "purple"
+                              if category_name in {
+                                  "ATZ",
+                                  "MATZ",
+                                  "RMZ",
+                                  "TMZ"
+                              }
+                              else
+                              "red"
+                              if category_name in {
+                                  "P",
+                                  "R",
+                                  "D"
+                              }
+                              else
+                              "blue"
+                          ),
+
+                          "lineStyle": boundary,
+
+                          "airspaceType": (
+                              air_type or ""
+                          ),
+
+                          "airspaceClass": (
+                              classification or ""
+                          ),
+
+                          "source": (
+                              "NATS UK ICAO AIP Dataset"
+                          ),
+
+                          "airac": AIRAC
+                      }
+                  }
               )
 
 
@@ -2402,29 +2557,24 @@ jobs:
           print("")
 
           print(
-              f"Source Airspace features: {len(airspaces)}"
+              "Source Airspace features:",
+              len(airspaces)
           )
 
           print(
-              f"Valid geometries: {len(features)}"
+              "Selected by AviMap filter:",
+              len(selected_airspaces)
           )
 
           print(
-              f"Geometry failures: {failures}"
+              "Valid geometries:",
+              len(features)
           )
 
-          print("")
           print(
-              "Failure reasons:"
+              "Geometry failures:",
+              failures
           )
-
-          for reason, count in sorted(
-              failure_reasons.items()
-          ):
-
-              print(
-                  f"  {reason}: {count}"
-              )
 
           print("")
           print(
@@ -2437,6 +2587,19 @@ jobs:
 
               print(
                   f"  {category}: {count}"
+              )
+
+          print("")
+          print(
+              "Failure reasons:"
+          )
+
+          for reason, count in sorted(
+              failure_reasons.items()
+          ):
+
+              print(
+                  f"  {reason}: {count}"
               )
 
 
@@ -2452,10 +2615,9 @@ jobs:
                   "zero valid airspace geometries."
               )
 
-              print("")
               print(
-                  "Existing uk-airspace.geojson has NOT "
-                  "been replaced."
+                  "Existing uk-airspace.geojson has "
+                  "NOT been replaced."
               )
 
               sys.exit(1)
@@ -2465,23 +2627,25 @@ jobs:
 
               print("")
               print(
-                  "ERROR: Suspiciously small airspace dataset."
+                  "ERROR: Suspiciously small filtered "
+                  "airspace dataset."
               )
 
               print(
-                  f"Only {len(features)} geometries were produced."
+                  f"Only {len(features)} geometries "
+                  "were produced."
               )
 
               print(
-                  "Existing uk-airspace.geojson has NOT "
-                  "been replaced."
+                  "Existing uk-airspace.geojson has "
+                  "NOT been replaced."
               )
 
               sys.exit(1)
 
 
           # ========================================================
-          # WRITE
+          # WRITE GEOJSON
           # ========================================================
 
           collection = {
@@ -2636,19 +2800,16 @@ jobs:
                   if latitude:
 
                       if -90 <= number <= 90:
-
                           return number
 
                   else:
 
                       if -180 <= number <= 180:
-
                           return number
 
               except ValueError:
 
                   pass
-
 
               match = re.fullmatch(
                   r"(\d+)([NSEW])",
@@ -2656,7 +2817,6 @@ jobs:
               )
 
               if not match:
-
                   return None
 
               digits = match.group(1)
@@ -2665,13 +2825,11 @@ jobs:
               if latitude:
 
                   if len(digits) != 6:
-
                       return None
 
               else:
 
                   if len(digits) != 7:
-
                       return None
 
               degrees = int(
@@ -2727,7 +2885,6 @@ jobs:
               print("CSV fields:")
 
               for header in headers:
-
                   print(
                       f"  {header}"
                   )
@@ -2958,6 +3115,10 @@ jobs:
           print("")
           print(
               f"Written: {OUTPUT}"
+          )
+
+          print(
+              f"Features: {len(features)}"
           )
 
           PY
@@ -3251,4 +3412,4 @@ jobs:
           echo "AIRAC:"
           echo "$AIRAC"
           echo ""
-          echo "NATS airspace and VRP data committed."
+          echo "Filtered NATS airspace and VRP data committed."
