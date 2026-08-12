@@ -23,18 +23,13 @@ jobs:
 
 
       # ============================================================
-      # FIND CURRENT NATS DATASETS
+      # DETERMINE CURRENT NATS DATASET DATE
       #
-      # IMPORTANT:
-      # The NATS checklist currently published on the site is the
-      # 09 July 2026 checklist. It contains the 06 August 2026
-      # effective AIP and VRP datasets.
-      #
-      # We therefore use the accessible checklist rather than
-      # constructing a future checklist URL.
+      # We use the NATS Digital Datasets page directly.
+      # No Dataset Checklist is required.
       # ============================================================
 
-      - name: Find current NATS AIP and VRP datasets
+      - name: Find current NATS datasets
         run: |
           set -euo pipefail
 
@@ -42,500 +37,421 @@ jobs:
           echo "Finding current NATS datasets"
           echo "=========================================="
 
+          NATS_PAGE="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 5 \
+            -L \
+            -A "AviMap/1.0" \
+            "${NATS_PAGE}" \
+            -o /tmp/nats-index.html
+
+          test -s /tmp/nats-index.html
+
+          echo ""
+          echo "NATS page downloaded successfully."
+
           python3 <<'PY'
-          import html
           import re
-          import urllib.request
-          from datetime import datetime, timezone
-          from pathlib import Path
-          from urllib.parse import urljoin, unquote
+          from datetime import date
 
-          USER_AGENT = "AviMap-NATS-Data-Updater/1.0"
-
-          INDEX_URL = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/opencms/en/Publications/"
-              "digital-datasets/index.html"
-          )
-
-          CHECKLIST_URL = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/opencms/en/Publications/"
-              "digital-datasets/Checklists/"
-              "Dataset_Checklist_2026_07_09.HTML"
-          )
-
-          def fetch(url):
-              request = urllib.request.Request(
-                  url,
-                  headers={
-                      "User-Agent": USER_AGENT
-                  }
-              )
-
-              with urllib.request.urlopen(
-                  request,
-                  timeout=60
-              ) as response:
-                  return response.read().decode(
-                      "utf-8",
-                      errors="replace"
-                  )
-
-          today = datetime.now(
-              timezone.utc
-          ).date()
-
-          print("")
-          print("Downloading NATS digital dataset index...")
-
-          index = fetch(
-              INDEX_URL
-          )
-
-          print("Downloading NATS Dataset Checklist...")
-
-          checklist = fetch(
-              CHECKLIST_URL
-          )
-
-          checklist = html.unescape(
-              checklist
-          )
-
-          Path(
-              "/tmp/nats-checklist.html"
-          ).write_text(
-              checklist,
-              encoding="utf-8"
-          )
-
-          print("")
-          print("NATS checklist:")
-          print(
-              "  09 July 2026"
-          )
-          print(
-              f"  {CHECKLIST_URL}"
-          )
-          print("")
+          html = open(
+              "/tmp/nats-index.html",
+              encoding="utf-8",
+              errors="replace"
+          ).read()
 
           # --------------------------------------------------------
-          # Extract filenames from the checklist.
+          # NATS currently displays AIRAC dates as DD/MM/YYYY.
+          # Find every date appearing on the dataset page.
           # --------------------------------------------------------
 
-          def find_names(pattern):
-              return sorted(
-                  set(
-                      re.findall(
-                          pattern,
-                          checklist,
-                          flags=re.I
-                      )
-                  )
-              )
+          dates = []
 
-          aip_xml_names = find_names(
-              r'EG_AIP_DS_FULL_\d{8}\.XML'
-          )
-
-          aip_kml_names = find_names(
-              r'EG_AIP_DS_FULL_\d{8}\.KML'
-          )
-
-          vrp_csv_names = find_names(
-              r'EG_VRP_DS_AREA1_FULL_\d{8}\.CSV'
-          )
-
-          print("==========================================")
-          print("NATS DATASETS FOUND")
-          print("==========================================")
-          print("")
-
-          print("AIP XML:")
-          for name in aip_xml_names:
-              print(
-                  f"  {name}"
-              )
-
-          print("")
-          print("AIP KML:")
-          for name in aip_kml_names:
-              print(
-                  f"  {name}"
-              )
-
-          print("")
-          print("VRP CSV:")
-          for name in vrp_csv_names:
-              print(
-                  f"  {name}"
-              )
-
-          print("")
-
-          def dataset_date(filename):
-              match = re.search(
-                  r'_(\d{8})\.',
-                  filename
-              )
-
-              if not match:
-                  return None
+          for match in re.finditer(
+              r'\b(\d{2})/(\d{2})/(\d{4})\b',
+              html
+          ):
+              day = int(match.group(1))
+              month = int(match.group(2))
+              year = int(match.group(3))
 
               try:
-                  return datetime.strptime(
-                      match.group(1),
-                      "%Y%m%d"
-                  ).date()
-
+                  d = date(
+                      year,
+                      month,
+                      day
+                  )
               except ValueError:
-                  return None
+                  continue
 
-          def select_latest(
-              names,
-              description
-          ):
-              candidates = []
+              if d <= date.today():
+                  dates.append(d)
 
-              for name in names:
-
-                  date = dataset_date(
-                      name
-                  )
-
-                  if (
-                      date is not None
-                      and
-                      date <= today
-                  ):
-                      candidates.append(
-                          (
-                              date,
-                              name
-                          )
-                      )
-
-              if not candidates:
-                  raise SystemExit(
-                      f"ERROR: No current {description} dataset "
-                      "was found in the NATS checklist."
-                  )
-
-              return max(
-                  candidates,
-                  key=lambda item: item[0]
-              )
-
-          aip_xml_date, aip_xml_name = select_latest(
-              aip_xml_names,
-              "AIP XML"
-          )
-
-          aip_kml_date, aip_kml_name = select_latest(
-              aip_kml_names,
-              "AIP KML"
-          )
-
-          vrp_date, vrp_name = select_latest(
-              vrp_csv_names,
-              "VRP CSV"
-          )
-
-          if aip_xml_date != aip_kml_date:
+          if not dates:
               raise SystemExit(
-                  "ERROR: AIP XML and KML dates do not match: "
-                  f"{aip_xml_date} / {aip_kml_date}"
+                  "ERROR: Could not find an effective NATS dataset date."
               )
 
-          # --------------------------------------------------------
-          # Find actual download links in the checklist.
-          # --------------------------------------------------------
-
-          def find_download_url(
-              filename
-          ):
-              escaped = re.escape(
-                  filename
-              )
-
-              # First try an href directly containing the filename.
-              match = re.search(
-                  r'href\s*=\s*["\']([^"\']*'
-                  + escaped
-                  + r'[^"\']*)["\']',
-                  checklist,
-                  flags=re.I
-              )
-
-              if match:
-                  href = html.unescape(
-                      unquote(
-                          match.group(1)
-                      )
-                  )
-
-                  return urljoin(
-                      CHECKLIST_URL,
-                      href
-                  )
-
-              # Then inspect the HTML around the filename.
-              for occurrence in re.finditer(
-                  escaped,
-                  checklist,
-                  flags=re.I
-              ):
-
-                  start = max(
-                      0,
-                      occurrence.start() - 5000
-                  )
-
-                  end = min(
-                      len(checklist),
-                      occurrence.end() + 5000
-                  )
-
-                  nearby = checklist[
-                      start:end
-                  ]
-
-                  hrefs = re.findall(
-                      r'href\s*=\s*["\']([^"\']+)["\']',
-                      nearby,
-                      flags=re.I
-                  )
-
-                  for href in hrefs:
-
-                      href = html.unescape(
-                          unquote(
-                              href
-                          )
-                      )
-
-                      url = urljoin(
-                          CHECKLIST_URL,
-                          href
-                      )
-
-                      if "/cms-nats/export/" in url:
-                          return url
-
-              return None
-
-          aip_xml_url = find_download_url(
-              aip_xml_name
+          effective = max(
+              dates
           )
 
-          aip_kml_url = find_download_url(
-              aip_kml_name
+          dates_text = effective.strftime(
+              "%Y%m%d"
           )
 
-          vrp_url = find_download_url(
-              vrp_name
-          )
-
-          # --------------------------------------------------------
-          # Known NATS export paths.
-          #
-          # These are used only if the checklist does not expose
-          # the download link directly.
-          # --------------------------------------------------------
-
-          EXPORT_BASE = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/export/sites/default/en/"
-              "Publications/digital-datasets/"
-          )
-
-          if aip_xml_url is None:
-              aip_xml_url = (
-                  EXPORT_BASE
-                  + "AIP/"
-                  + aip_xml_name
-              )
-
-          if aip_kml_url is None:
-              aip_kml_url = (
-                  EXPORT_BASE
-                  + "AIP/"
-                  + aip_kml_name
-              )
-
-          if vrp_url is None:
-              vrp_url = (
-                  EXPORT_BASE
-                  + "VRP/"
-                  + vrp_name
-              )
-
+          print("")
           print("==========================================")
-          print("SELECTED NATS DATASETS")
+          print("NATS DATASET DATE")
           print("==========================================")
           print("")
-
           print(
-              f"AIP AIRAC DATE : {aip_xml_date}"
+              f"Effective date: {effective}"
           )
-
           print(
-              f"AIP XML        : {aip_xml_name}"
+              f"Dataset suffix: {dates_text}"
           )
-
-          print(
-              f"AIP XML URL    : {aip_xml_url}"
-          )
-
           print("")
 
-          print(
-              f"AIP KML        : {aip_kml_name}"
-          )
+          # --------------------------------------------------------
+          # The NATS Digital Dataset page currently identifies the
+          # UK ICAO AIP and VRP datasets. Store the effective date
+          # for the download step.
+          # --------------------------------------------------------
 
-          print(
-              f"AIP KML URL    : {aip_kml_url}"
-          )
-
-          print("")
-
-          print(
-              f"VRP DATE       : {vrp_date}"
-          )
-
-          print(
-              f"VRP CSV        : {vrp_name}"
-          )
-
-          print(
-              f"VRP CSV URL    : {vrp_url}"
-          )
-
-          print("")
-
-          Path(
-              "/tmp/nats-aip-xml-url.txt"
-          ).write_text(
-              aip_xml_url,
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-aip-kml-url.txt"
-          ).write_text(
-              aip_kml_url,
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-vrp-url.txt"
-          ).write_text(
-              vrp_url,
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-airac-date.txt"
-          ).write_text(
-              str(aip_xml_date),
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-vrp-date.txt"
-          ).write_text(
-              str(vrp_date),
-              encoding="utf-8"
-          )
+          with open(
+              "/tmp/nats-date.txt",
+              "w"
+          ) as f:
+              f.write(
+                  dates_text
+              )
           PY
 
 
       # ============================================================
-      # DOWNLOAD AIP
+      # DOWNLOAD NATS AIP DATA
+      #
+      # Try the known NATS export structures rather than depending
+      # on the Dataset Checklist.
       # ============================================================
 
-      - name: Download NATS UK ICAO AIP dataset
+      - name: Download NATS AIP data
         run: |
           set -euo pipefail
 
+          DATE=$(cat /tmp/nats-date.txt)
+
           mkdir -p /tmp/nats
-
-          AIP_XML_URL=$(
-            cat /tmp/nats-aip-xml-url.txt
-          )
-
-          AIP_KML_URL=$(
-            cat /tmp/nats-aip-kml-url.txt
-          )
 
           echo "=========================================="
           echo "Downloading NATS AIP"
           echo "=========================================="
           echo ""
-          echo "XML:"
-          echo "${AIP_XML_URL}"
-          echo ""
-          echo "KML:"
-          echo "${AIP_KML_URL}"
+          echo "AIRAC: ${DATE}"
           echo ""
 
-          curl \
+          AIP_XML="EG_AIP_DS_FULL_${DATE}.XML"
+          AIP_KML="EG_AIP_DS_FULL_${DATE}.KML"
+
+          # NATS export location used by the digital datasets service.
+          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
+
+          XML_URL="${BASE}/AIP/${AIP_XML}"
+          KML_URL="${BASE}/AIP/${AIP_KML}"
+
+          echo "Trying:"
+          echo "${XML_URL}"
+          echo ""
+
+          if ! curl \
             --fail \
             --silent \
             --show-error \
-            --retry 3 \
+            --retry 5 \
             --retry-delay 5 \
             -L \
-            "${AIP_XML_URL}" \
+            -A "AviMap/1.0" \
+            "${XML_URL}" \
             -o /tmp/nats/aip.xml
+          then
 
-          curl \
+            echo ""
+            echo "Primary AIP XML location failed."
+            echo "Searching the NATS page for the actual download URL."
+
+            python3 <<'PY'
+            import re
+            import html
+            from urllib.parse import urljoin
+
+            source = open(
+                "/tmp/nats-index.html",
+                encoding="utf-8",
+                errors="replace"
+            ).read()
+
+            target = open(
+                "/tmp/nats-date.txt"
+            ).read().strip()
+
+            filename = (
+                f"EG_AIP_DS_FULL_{target}.XML"
+            )
+
+            urls = []
+
+            for href in re.findall(
+                r'href\s*=\s*["\']([^"\']+)["\']',
+                html.unescape(source),
+                flags=re.I
+            ):
+
+                href = html.unescape(
+                    href
+                )
+
+                if filename.lower() in href.lower():
+                    urls.append(
+                        urljoin(
+                            "https://nats-uk.ead-it.com/",
+                            href
+                        )
+                    )
+
+            if not urls:
+                raise SystemExit(
+                    "ERROR: Could not locate the NATS AIP XML download URL."
+                )
+
+            open(
+                "/tmp/nats-aip-xml-url.txt",
+                "w"
+            ).write(
+                urls[0]
+            )
+            PY
+
+            XML_URL=$(cat /tmp/nats-aip-xml-url.txt)
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 5 \
+              --retry-delay 5 \
+              -L \
+              -A "AviMap/1.0" \
+              "${XML_URL}" \
+              -o /tmp/nats/aip.xml
+          fi
+
+          echo ""
+          echo "Trying:"
+          echo "${KML_URL}"
+          echo ""
+
+          if ! curl \
             --fail \
             --silent \
             --show-error \
-            --retry 3 \
+            --retry 5 \
             --retry-delay 5 \
             -L \
-            "${AIP_KML_URL}" \
+            -A "AviMap/1.0" \
+            "${KML_URL}" \
             -o /tmp/nats/aip.kml
+          then
+
+            echo ""
+            echo "Primary AIP KML location failed."
+            echo "Searching the NATS page for the actual download URL."
+
+            python3 <<'PY'
+            import re
+            import html
+            from urllib.parse import urljoin
+
+            source = open(
+                "/tmp/nats-index.html",
+                encoding="utf-8",
+                errors="replace"
+            ).read()
+
+            target = open(
+                "/tmp/nats-date.txt"
+            ).read().strip()
+
+            filename = (
+                f"EG_AIP_DS_FULL_{target}.KML"
+            )
+
+            urls = []
+
+            for href in re.findall(
+                r'href\s*=\s*["\']([^"\']+)["\']',
+                html.unescape(source),
+                flags=re.I
+            ):
+
+                href = html.unescape(
+                    href
+                )
+
+                if filename.lower() in href.lower():
+                    urls.append(
+                        urljoin(
+                            "https://nats-uk.ead-it.com/",
+                            href
+                        )
+                    )
+
+            if not urls:
+                raise SystemExit(
+                    "ERROR: Could not locate the NATS AIP KML download URL."
+                )
+
+            open(
+                "/tmp/nats-aip-kml-url.txt",
+                "w"
+            ).write(
+                urls[0]
+            )
+            PY
+
+            KML_URL=$(cat /tmp/nats-aip-kml-url.txt)
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 5 \
+              --retry-delay 5 \
+              -L \
+              -A "AviMap/1.0" \
+              "${KML_URL}" \
+              -o /tmp/nats/aip.kml
+          fi
 
           test -s /tmp/nats/aip.xml
           test -s /tmp/nats/aip.kml
 
           echo ""
-          echo "Downloaded AIP files:"
-          ls -lh /tmp/nats/
+          echo "AIP download successful:"
+          ls -lh \
+            /tmp/nats/aip.xml \
+            /tmp/nats/aip.kml
 
 
       # ============================================================
-      # DOWNLOAD VRP
+      # DOWNLOAD NATS VRP DATA
       # ============================================================
 
-      - name: Download NATS VRP dataset
+      - name: Download NATS VRP data
         run: |
           set -euo pipefail
 
-          VRP_URL=$(
-            cat /tmp/nats-vrp-url.txt
-          )
+          DATE=$(cat /tmp/nats-date.txt)
+
+          VRP="EG_VRP_DS_AREA1_FULL_${DATE}.CSV"
+
+          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
+
+          VRP_URL="${BASE}/VRP/${VRP}"
 
           echo "=========================================="
-          echo "Downloading NATS VRP dataset"
+          echo "Downloading NATS VRP"
           echo "=========================================="
           echo ""
           echo "${VRP_URL}"
           echo ""
 
-          curl \
+          if ! curl \
             --fail \
             --silent \
             --show-error \
-            --retry 3 \
+            --retry 5 \
             --retry-delay 5 \
             -L \
+            -A "AviMap/1.0" \
             "${VRP_URL}" \
             -o /tmp/nats/vrp-download
+          then
+
+            echo ""
+            echo "Primary VRP location failed."
+            echo "Searching NATS page for actual VRP download URL."
+
+            python3 <<'PY'
+            import re
+            import html
+            from urllib.parse import urljoin
+
+            source = open(
+                "/tmp/nats-index.html",
+                encoding="utf-8",
+                errors="replace"
+            ).read()
+
+            target = open(
+                "/tmp/nats-date.txt"
+            ).read().strip()
+
+            filename = (
+                f"EG_VRP_DS_AREA1_FULL_{target}.CSV"
+            )
+
+            urls = []
+
+            for href in re.findall(
+                r'href\s*=\s*["\']([^"\']+)["\']',
+                html.unescape(source),
+                flags=re.I
+            ):
+
+                href = html.unescape(
+                    href
+                )
+
+                if filename.lower() in href.lower():
+                    urls.append(
+                        urljoin(
+                            "https://nats-uk.ead-it.com/",
+                            href
+                        )
+                    )
+
+            if not urls:
+                raise SystemExit(
+                    "ERROR: Could not locate NATS VRP download URL."
+                )
+
+            open(
+                "/tmp/nats-vrp-url.txt",
+                "w"
+            ).write(
+                urls[0]
+            )
+            PY
+
+            VRP_URL=$(cat /tmp/nats-vrp-url.txt)
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 5 \
+              --retry-delay 5 \
+              -L \
+              -A "AviMap/1.0" \
+              "${VRP_URL}" \
+              -o /tmp/nats/vrp-download
+          fi
 
           test -s /tmp/nats/vrp-download
 
@@ -562,7 +478,7 @@ jobs:
             )
 
             if [ -z "${VRP_CSV}" ]; then
-              echo "ERROR: No CSV found in VRP ZIP."
+              echo "ERROR: No CSV found in VRP archive."
               exit 1
             fi
 
@@ -571,8 +487,6 @@ jobs:
               /tmp/nats/vrps.csv
 
           else
-
-            echo "VRP download is not a ZIP."
 
             cp \
               /tmp/nats/vrp-download \
@@ -583,7 +497,7 @@ jobs:
           test -s /tmp/nats/vrps.csv
 
           echo ""
-          echo "VRP CSV:"
+          echo "VRP download successful:"
           wc -l /tmp/nats/vrps.csv
 
 
@@ -617,12 +531,12 @@ jobs:
 
           def text(element):
               return " ".join(
-                  part.strip()
-                  for part in element.itertext()
-                  if part.strip()
+                  x.strip()
+                  for x in element.itertext()
+                  if x.strip()
               )
 
-          def coordinates(value):
+          def parse_coords(value):
               result = []
 
               for token in re.split(
@@ -759,7 +673,7 @@ jobs:
                   ) != "coordinates":
                       continue
 
-                  coords = coordinates(
+                  coords = parse_coords(
                       text(element)
                   )
 
@@ -787,10 +701,7 @@ jobs:
                       ),
                       "description": description,
                       "category": category,
-                      "source": "NATS UK ICAO AIP Dataset",
-                      "airac": Path(
-                          "/tmp/nats-airac-date.txt"
-                      ).read_text().strip()
+                      "source": "NATS UK ICAO AIP Dataset"
                   },
                   "geometry": {
                       "type": "Polygon",
@@ -800,7 +711,7 @@ jobs:
 
           if not features:
               raise SystemExit(
-                  "ERROR: NATS KML produced zero airspace polygons."
+                  "ERROR: NATS AIP produced zero airspace polygons."
               )
 
           Path(
@@ -816,7 +727,6 @@ jobs:
               encoding="utf-8"
           )
 
-          print("")
           print(
               f"Airspace polygons: {len(features)}"
           )
@@ -861,14 +771,14 @@ jobs:
 
           if not rows:
               raise SystemExit(
-                  "ERROR: VRP CSV contains zero records."
+                  "ERROR: NATS VRP CSV contains zero records."
               )
 
           fields = list(
               rows[0].keys()
           )
 
-          def normalise(value):
+          def norm(value):
               return re.sub(
                   r"[^a-z0-9]",
                   "",
@@ -876,7 +786,7 @@ jobs:
               )
 
           lookup = {
-              normalise(field): field
+              norm(field): field
               for field in fields
               if field
           }
@@ -885,7 +795,7 @@ jobs:
 
               for name in names:
 
-                  key = normalise(
+                  key = norm(
                       name
                   )
 
@@ -896,7 +806,7 @@ jobs:
 
                   for name in names:
 
-                      wanted = normalise(
+                      wanted = norm(
                           name
                       )
 
@@ -943,15 +853,15 @@ jobs:
               )
 
           print("")
-          print("Detected:")
+          print("Detected fields:")
           print(
-              f"  Name      = {name_field}"
+              f"  Name:      {name_field}"
           )
           print(
-              f"  Latitude  = {lat_field}"
+              f"  Latitude:  {lat_field}"
           )
           print(
-              f"  Longitude = {lon_field}"
+              f"  Longitude: {lon_field}"
           )
 
           if not lat_field or not lon_field:
@@ -1161,6 +1071,7 @@ jobs:
                   or
                   lon is None
               ):
+
                   invalid += 1
                   continue
 
@@ -1180,9 +1091,9 @@ jobs:
                   )
 
               properties = {
-                  str(key): value
-                  for key, value in row.items()
-                  if key
+                  str(k): v
+                  for k, v in row.items()
+                  if k
               }
 
               properties["name"] = name
@@ -1215,6 +1126,7 @@ jobs:
           print(
               f"Invalid coordinates: {invalid}"
           )
+          print("")
 
           if not features:
               raise SystemExit(
@@ -1237,10 +1149,10 @@ jobs:
 
 
       # ============================================================
-      # VALIDATE
+      # VALIDATE BEFORE TOUCHING REPOSITORY DATA
       # ============================================================
 
-      - name: Validate generated NATS data
+      - name: Validate generated data
         run: |
           set -euo pipefail
 
@@ -1256,7 +1168,7 @@ jobs:
 
           echo ""
           echo "=========================================="
-          echo "FINAL NATS DATA COUNTS"
+          echo "FINAL DATA VALIDATION"
           echo "=========================================="
           echo ""
           echo "Airspaces : ${AIRSPACE_COUNT}"
@@ -1264,23 +1176,23 @@ jobs:
           echo ""
 
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
-            echo "ERROR: Airspace dataset is empty."
+            echo "ERROR: Airspace data is empty."
             exit 1
           fi
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
-            echo "ERROR: VRP dataset is empty."
+            echo "ERROR: VRP data is empty."
             exit 1
           fi
 
-          echo "Validation successful."
+          echo "Validation passed."
 
 
       # ============================================================
-      # INSTALL
+      # INSTALL DATA
       # ============================================================
 
-      - name: Install validated NATS data
+      - name: Install validated aviation data
         run: |
           set -euo pipefail
 
@@ -1297,18 +1209,15 @@ jobs:
           cat > data/SOURCES.md <<'EOF'
           # AviMap UK aviation data
 
-          Aviation data is sourced from NATS UK digital datasets.
+          Source: NATS UK Digital Datasets.
 
           Airspace:
           - UK ICAO AIP Dataset
-          - NATS AIP KML geometry
-          - Corresponding NATS AIXM XML dataset
 
           Reporting points:
-          - NATS Visual Reference Points (VRP) List
+          - Visual Reference Points (VRP) List
 
-          The GitHub Actions workflow validates both datasets before
-          replacing the repository data.
+          Data is validated before being committed to the repository.
           EOF
 
 
@@ -1316,7 +1225,7 @@ jobs:
       # COMMIT
       # ============================================================
 
-      - name: Commit updated NATS aviation data
+      - name: Commit updated aviation data
         run: |
           set -euo pipefail
 
@@ -1335,7 +1244,7 @@ jobs:
 
           if git diff --cached --quiet; then
 
-            echo "No changes detected."
+            echo "No aviation data changes."
 
           else
 
