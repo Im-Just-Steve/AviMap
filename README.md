@@ -21,16 +21,18 @@ OurAirports dataset.
 
 AviMap currently uses these map categories:
 
-| Airspace | Colour | Boundary |
-|---|---|---|
-| Class A | Purple | Solid |
-| Prohibited / Restricted / Danger | Red | Solid |
-| ATZ | Purple | Dashed |
-| TMZ | Purple | Dashed |
-| Controlled airspace | Blue | Solid |
-| MATZ | Blue | Dashed |
-| RMZ | Blue | Dashed |
-| Other / Class G | Grey | Solid |
+| Category | PWA display | Colour | Boundary |
+|---|---|---|---|
+| A | Class A | Purple | Solid |
+| B / C / D / E | Class B / C / D / E | Blue | Solid |
+| F / G | Class F / G | Grey | Solid |
+| PA | Prohibited | Red | Solid |
+| RA | Restricted | Red | Solid |
+| DA | Danger | Red | Solid |
+| ATZ | Aerodrome Traffic Zone | Purple | Dashed |
+| MATZ | Military Aerodrome Traffic Zone | Blue | Dashed |
+| RMZ | Radio Mandatory Zone | Blue | Dashed |
+| TMZ | Transponder Mandatory Zone | Purple | Dashed |
 
 The data pipeline normalises the NATS AIXM airspace type/class into these
 categories before the PWA renders them.

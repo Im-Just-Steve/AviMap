@@ -330,29 +330,26 @@ function classifyAirspaceStyle(properties = {}) {
   /*
    * AviMap UK airspace styling.
    *
-   * The GitHub data pipeline normalises the authoritative NATS AIXM
-   * airspace type/class into `category`, so the renderer does not depend
-   * on a provider-specific numeric enum.
-   *
-   * Class A                  -> purple / solid
-   * Prohibited/Restricted/Danger -> red / solid
-   * ATZ                      -> purple / dashed
-   * TMZ                      -> purple / dashed
-   * Controlled airspace     -> blue / solid
-   * MATZ                     -> blue / dashed
-   * RMZ                      -> blue / dashed
-   * Other / Class G          -> grey / solid
+   * Canonical NATS/AviMap categories:
+   *   A-G   -> existing class colours
+   *   PA    -> Prohibited (red)
+   *   RA    -> Restricted (red)
+   *   DA    -> Danger (red)
+   *   ATZ   -> ATZ colour / dashed
+   *   MATZ  -> blue / dashed
+   *   RMZ   -> blue / dashed
+   *   TMZ   -> ATZ colour / dashed
    */
 
   const category = String(
     properties.category || ""
   ).trim().toUpperCase();
 
-  if (category === "P/R/D") {
+  if (category === "PA" || category === "RA" || category === "DA") {
     return {
       color: "red",
       dash: false,
-      category: "P/R/D"
+      category
     };
   }
 
@@ -372,26 +369,34 @@ function classifyAirspaceStyle(properties = {}) {
     };
   }
 
-  if (category === "CLASS A") {
+  if (category === "A") {
     return {
       color: "purple",
       dash: false,
-      category: "Class A"
+      category: "A"
     };
   }
 
-  if (category === "CONTROLLED") {
+  if (["B", "C", "D", "E"].includes(category)) {
     return {
       color: "blue",
       dash: false,
-      category: "Controlled"
+      category
+    };
+  }
+
+  if (["F", "G"].includes(category)) {
+    return {
+      color: "grey",
+      dash: false,
+      category
     };
   }
 
   return {
     color: "grey",
     dash: false,
-    category: "Other"
+    category: category || "Other"
   };
 }
 
