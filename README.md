@@ -315,3 +315,9 @@ from `assets/aircraft-marker.png`. The image has been prepared with a
 transparent background and is rotated around its centre using the live
 aircraft heading. A heading of 0 degrees points the aircraft north/up on the
 map.
+
+## v1.0.15 aircraft marker
+
+The aircraft marker now uses the supplied yellow aircraft silhouette with a
+black outline and transparent background. The marker is kept as a local asset
+and continues to rotate with the live aircraft heading.

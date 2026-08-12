@@ -1,6 +1,6 @@
 {
-  "version": "1.0.14",
+  "version": "1.0.15",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Replaced the temporary CSS aircraft symbol with the supplied top-down aircraft marker artwork. The marker rotates with aircraft heading."
+  "releaseNotes": "Replaced the aircraft marker with the supplied yellow aviation silhouette."
 }
