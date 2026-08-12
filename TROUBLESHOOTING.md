@@ -7,7 +7,7 @@ Open Chrome DevTools → Console.
 You may see warnings for:
 
 - OurAirports
-- OpenAIP
+- NATS AIS
 - CORS
 - network timeout
 

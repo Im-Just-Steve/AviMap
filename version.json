@@ -1,6 +1,6 @@
 {
-  "version": "1.2.6",
+  "version": "1.3.0",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Aircraft tracking defaults to an approximately 10 NM radius view; manual panning disables tracking, manual zooming preserves tracking, and Centre restores tracking/10 NM view. VRPs remain visible in the ATZ purple."
+  "releaseNotes": "Switched UK airspace and VRP data to the NATS AIS source and normalised NATS AIXM airspace categories for AviMap rendering."
 }

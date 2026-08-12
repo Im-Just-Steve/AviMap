@@ -25,7 +25,7 @@ export async function loadAviationData(onProgress = () => {}) {
     if (!result.airspace.features.length) throw new Error("Local UK airspace file contains zero features");
     onProgress(`Loaded ${result.airspace.features.length.toLocaleString()} UK airspaces`);
   } catch (error) {
-    console.error("AviMap local airspace data failed:", error);
+    console.error("AviMap local NATS airspace data failed:", error);
     onProgress("UK airspace data unavailable — map remains available.");
   }
 

@@ -328,52 +328,27 @@ function addAirspace() {
 
 function classifyAirspaceStyle(properties = {}) {
   /*
-   * AviMap airspace styling specification:
+   * AviMap UK airspace styling.
    *
-   * Class A                         -> purple / solid
-   * Prohibited / Restricted / Danger -> red / solid
-   * ATZ                            -> purple / dashed
-   * TMZ                            -> purple / dashed
-   * Controlled airspace            -> blue / solid
-   * MATZ                           -> blue / dashed
-   * RMZ                            -> blue / dashed
-   * Other / Class G                -> grey / solid
+   * The GitHub data pipeline normalises the authoritative NATS AIXM
+   * airspace type/class into `category`, so the renderer does not depend
+   * on a provider-specific numeric enum.
    *
-   * IMPORTANT:
-   * Classification uses the actual OpenAIP numeric fields. We do not infer
-   * airspace type from its name/designator.
+   * Class A                  -> purple / solid
+   * Prohibited/Restricted/Danger -> red / solid
+   * ATZ                      -> purple / dashed
+   * TMZ                      -> purple / dashed
+   * Controlled airspace     -> blue / solid
+   * MATZ                     -> blue / dashed
+   * RMZ                      -> blue / dashed
+   * Other / Class G          -> grey / solid
    */
 
-  const type = Number(properties.type);
-  const icaoClass = Number(
-    properties.icaoClass ??
-    properties.icaoclass ??
-    properties.class
-  );
+  const category = String(
+    properties.category || ""
+  ).trim().toUpperCase();
 
-  // OpenAIP type values used by the current data pipeline.
-  const TYPE_RESTRICTED = 1;
-  const TYPE_DANGER = 2;
-  const TYPE_PROHIBITED = 3;
-  const TYPE_CTR = 4;
-  const TYPE_TMZ = 5;
-  const TYPE_RMZ = 6;
-  const TYPE_TMA = 7;
-  const TYPE_ATZ = 13;
-  const TYPE_MATZ = 14;
-  const TYPE_AIRWAY = 15;
-  const TYPE_CTA = 26;
-
-  // OpenAIP ICAO class values.
-  const ICAO_CLASS_A = 0;
-  const ICAO_CLASSES_CONTROLLED = new Set([1, 2, 3, 4, 5]);
-
-  // P/R/D always take priority over class information.
-  if (
-    type === TYPE_PROHIBITED ||
-    type === TYPE_RESTRICTED ||
-    type === TYPE_DANGER
-  ) {
+  if (category === "P/R/D") {
     return {
       color: "red",
       dash: false,
@@ -381,26 +356,23 @@ function classifyAirspaceStyle(properties = {}) {
     };
   }
 
-  // ATZ and TMZ are purple and dashed.
-  if (type === TYPE_ATZ || type === TYPE_TMZ) {
+  if (category === "ATZ" || category === "TMZ") {
     return {
       color: "purple",
       dash: true,
-      category: type === TYPE_ATZ ? "ATZ" : "TMZ"
+      category
     };
   }
 
-  // MATZ and RMZ are blue and dashed.
-  if (type === TYPE_MATZ || type === TYPE_RMZ) {
+  if (category === "MATZ" || category === "RMZ") {
     return {
       color: "blue",
       dash: true,
-      category: type === TYPE_MATZ ? "MATZ" : "RMZ"
+      category
     };
   }
 
-  // Class A is purple and solid.
-  if (icaoClass === ICAO_CLASS_A) {
+  if (category === "CLASS A") {
     return {
       color: "purple",
       dash: false,
@@ -408,14 +380,7 @@ function classifyAirspaceStyle(properties = {}) {
     };
   }
 
-  // Remaining controlled airspace is blue and solid.
-  if (
-    ICAO_CLASSES_CONTROLLED.has(icaoClass) ||
-    type === TYPE_CTR ||
-    type === TYPE_TMA ||
-    type === TYPE_AIRWAY ||
-    type === TYPE_CTA
-  ) {
+  if (category === "CONTROLLED") {
     return {
       color: "blue",
       dash: false,
@@ -423,7 +388,6 @@ function classifyAirspaceStyle(properties = {}) {
     };
   }
 
-  // Class G / unknown / other.
   return {
     color: "grey",
     dash: false,
@@ -466,7 +430,7 @@ function normaliseGeoJson(input) {
             properties.identifier ||
             `AREA ${index + 1}`,
 
-          // Preserve the original OpenAIP fields untouched.
+          // Preserve source fields for inspection.
           type: properties.type ?? null,
           icaoClass:
             properties.icaoClass ??

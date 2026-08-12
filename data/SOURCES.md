@@ -1,32 +1,35 @@
 # AviMap data sources
 
+## NATS AIS — UK ICAO AIP Dataset
+
+https://nats-uk.ead-it.com/
+
+AviMap uses the NATS UK ICAO AIP Dataset as its authoritative source for UK
+permanent and long-duration aeronautical information, including the airspace
+geometry used by the map. The dataset is published on AIRAC effective dates
+and supplied in AIXM 5.1 XML with KML as a secondary format.
+
+## NATS AIS — Visual Reference Points List
+
+https://nats-uk.ead-it.com/
+
+AviMap uses the NATS Visual Reference Points List for UK VRPs. This is an
+irregular NATS dataset and is selected by effective date by the GitHub Actions
+pipeline.
+
 ## OurAirports
 
 https://ourairports.com/data/
 
-The OurAirports site states that its data is public domain and is updated
-daily. AviMap uses it for the initial airport/aerodrome catalogue.
-
-## OpenAIP
-
-https://www.openaip.net/
-
-OpenAIP provides community aviation data and machine-readable exports. AviMap
-uses the UK airspace and reporting-point exports for this prototype.
-
-## UK authoritative source
-
-https://nats-uk.ead-it.com/
-
-The UK AIP and associated AIS material should be treated as the authoritative
-source for operational UK aeronautical information.
+The initial airport/aerodrome catalogue uses the OurAirports public-domain
+dataset. This is separate from the authoritative UK aviation overlays.
 
 ## CAA
 
 https://www.caa.co.uk/
 
-CAA material explains the UK's aeronautical data chain and obstacle-data
-publication requirements.
+CAA material may be used for supporting documentation and regulatory context.
 
-AviMap should not imply that OpenAIP or OurAirports is an authoritative
-replacement for the UK AIP.
+AviMap is not a substitute for the current UK AIP, NOTAMs, or official flight
+information. Always verify current operational information before real-world
+flight.
