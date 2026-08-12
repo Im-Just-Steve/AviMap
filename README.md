@@ -98,3 +98,13 @@ development, but they are not a substitute for current UK AIP/AIS,
 NOTAMs or other authoritative operational information.
 
 AviMap is not currently an approved navigation product.
+
+
+## v1.0.2 fixes
+
+- Restored map drag/pan and touch zoom behaviour.
+- Enabled MapLibre dragPan, scrollZoom and touchZoomRotate.
+- Fixed the aircraft marker so MapLibre retains control of its geographic
+  positioning transform. Heading rotation is now applied to an inner icon,
+  preventing repeated telemetry updates from producing marker rendering
+  artefacts or a stack of markers.

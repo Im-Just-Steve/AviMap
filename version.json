@@ -1,6 +1,6 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed startup so the map appears immediately and aviation data loads independently with timeouts."
+  "releaseNotes": "Fixed map touch pan/zoom and aircraft marker rendering."
 }

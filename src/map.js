@@ -29,7 +29,10 @@ export function createMap({ data, onSelect, onReady }) {
     touchPitch: false,
     boxZoom: false,
     keyboard: false,
-    doubleClickZoom: false,
+    doubleClickZoom: true,
+    dragPan: true,
+    scrollZoom: true,
+    touchZoomRotate: true,
     crossSourceCollisions: false,
     validateStyle: false,
     pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5),
@@ -355,15 +358,25 @@ export function setAircraft(position) {
   if (!aircraftMarker) {
     const el = document.createElement("div");
     el.className = "aircraft-marker";
+
+    // MapLibre owns the outer marker transform. Never overwrite it with the
+    // aircraft heading, otherwise every telemetry update can break positioning.
+    const icon = document.createElement("div");
+    icon.className = "aircraft-icon";
+    el.appendChild(icon);
+
     aircraftMarker = new maplibregl.Marker({
       element: el,
       rotationAlignment: "map",
       pitchAlignment: "map"
-    }).addTo(map);
+    }).setLngLat([position.lon, position.lat]).addTo(map);
+
+    aircraftMarker._avimapIcon = icon;
   }
 
   aircraftMarker.setLngLat([position.lon, position.lat]);
-  aircraftMarker.getElement().style.transform = `rotate(${position.heading || 0}deg)`;
+  aircraftMarker._avimapIcon.style.transform =
+    `rotate(${position.heading || 0}deg)`;
 }
 
 export function centerOn(position) {
