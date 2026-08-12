@@ -1,6 +1,6 @@
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed UK VRP acquisition by using the OpenAIP reporting-points API in GitHub Actions, converting API records to local GeoJSON, and rendering VRPs with a native MapLibre circle layer. Also fixed early telemetry arriving before the MapLibre style has loaded."
+  "releaseNotes": "Fixed MapLibre glyph loading by removing the invalid Open Sans/Arial Unicode MS font-stack from the OpenFreeMap glyph request."
 }

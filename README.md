@@ -356,3 +356,10 @@ VRPs are rendered using a native MapLibre circle layer, avoiding dependency on
 a basemap sprite icon. Aircraft telemetry received before the MapLibre style
 has loaded is queued so it no longer produces `Style is not done loading`
 errors.
+
+
+## v1.2.2 Map glyph fix
+
+Fixed the OpenFreeMap glyph requests caused by the style's
+`Open Sans Regular,Arial Unicode MS Regular` font stack. AviMap now requests
+the Open Sans glyph set without the invalid comma/space font-stack segment.
