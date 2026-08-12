@@ -1,370 +1,83 @@
-name: Update UK aviation data
+name: Test NATS AIP download paths
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "20 3 * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  update:
+  test:
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Find current NATS dataset checklist
+      - name: Test NATS AIP download paths
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+
+          DATE="20260806"
 
           echo "=========================================="
-          echo "Finding current NATS dataset checklist"
+          echo "NATS AIP DOWNLOAD TEST"
           echo "=========================================="
+          echo ""
+          echo "Testing AIRAC date: $DATE"
+          echo ""
 
-          INDEX_URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            --retry 5 \
-            --retry-delay 5 \
-            --user-agent "AviMap/1.0" \
-            "$INDEX_URL" \
-            --output /tmp/nats-index.html
-
-          test -s /tmp/nats-index.html
-
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-          from urllib.parse import urljoin
-
-          html = Path(
-              "/tmp/nats-index.html"
-          ).read_text(
-              encoding="utf-8",
-              errors="replace"
+          FILES=(
+            "EG_AIP_DS_FULL_${DATE}.XML"
+            "EG_AIP_DS_FULL_${DATE}.KML"
+            "EG_AIP_DS_DIFF_DELTA_${DATE}.XML"
           )
 
-          base = "https://nats-uk.ead-it.com/"
-
-          hrefs = re.findall(
-              r"""href\s*=\s*["']([^"']+)["']""",
-              html,
-              flags=re.I
+          PATHS=(
+            "AIP"
+            "AIP/"
+            "AIP%20Data"
+            "AIP_Data"
+            "aip"
+            "AIP-Dataset"
+            "AIP_Dataset"
+            "AIP%20Dataset"
+            "AIP%20Data%20Set"
+            "AIP_Data_Set"
+            "AIXM"
+            "AIXM51"
           )
 
-          candidates = []
+          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
 
-          for href in hrefs:
-              url = urljoin(base, href)
+          for DIR in "${PATHS[@]}"; do
 
-              if (
-                  "Dataset_Checklist_" in url
-                  and
-                  url.lower().endswith(".html")
-              ):
-                  candidates.append(url)
+            echo ""
+            echo "------------------------------------------"
+            echo "Testing directory: $DIR"
+            echo "------------------------------------------"
 
-          candidates = list(dict.fromkeys(candidates))
+            for FILE in "${FILES[@]}"; do
 
-          if not candidates:
-              matches = re.findall(
-                  r"""([^"' <>\s]*Dataset_Checklist_[0-9_]+\.HTML)""",
-                  html,
-                  flags=re.I
+              URL="$BASE/$DIR/$FILE"
+
+              STATUS=$(
+                curl \
+                  --silent \
+                  --output /dev/null \
+                  --write-out "%{http_code}" \
+                  --location \
+                  --max-time 20 \
+                  --user-agent "AviMap/1.0" \
+                  "$URL"
               )
 
-              for match in matches:
-                  url = urljoin(base, match)
+              echo "$STATUS  $URL"
 
-                  if url not in candidates:
-                      candidates.append(url)
+            done
 
-          print("")
-          print("Checklist candidates:")
-          print("")
-
-          for url in candidates:
-              print(url)
-
-          print("")
-
-          if not candidates:
-              raise SystemExit(
-                  "ERROR: Could not find a NATS Dataset Checklist."
-              )
-
-          def checklist_key(url):
-              match = re.search(
-                  r"Dataset_Checklist_(\d{4})_(\d{2})_(\d{2})",
-                  url
-              )
-
-              if not match:
-                  return (0, 0, 0)
-
-              return tuple(
-                  int(x)
-                  for x in match.groups()
-              )
-
-          candidates.sort(
-              key=checklist_key,
-              reverse=True
-          )
-
-          selected = candidates[0]
-
-          print(
-              f"Selected checklist: {selected}"
-          )
-
-          Path(
-              "/tmp/nats-checklist-url.txt"
-          ).write_text(
-              selected,
-              encoding="utf-8"
-          )
-          PY
-
-      - name: Download NATS dataset checklist
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          CHECKLIST_URL=$(cat /tmp/nats-checklist-url.txt)
+          done
 
           echo ""
           echo "=========================================="
-          echo "Downloading NATS checklist"
+          echo "TEST COMPLETE"
           echo "=========================================="
-          echo ""
-          echo "$CHECKLIST_URL"
-          echo ""
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            --retry 5 \
-            --retry-delay 5 \
-            --user-agent "AviMap/1.0" \
-            "$CHECKLIST_URL" \
-            --output /tmp/nats-checklist.html
-
-          test -s /tmp/nats-checklist.html
-
-          echo "Checklist downloaded."
-
-      - name: DEBUG NATS checklist
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo ""
-          echo "=========================================="
-          echo "NATS CHECKLIST DEBUG"
-          echo "=========================================="
-
-          echo ""
-          echo "Checklist URL:"
-          cat /tmp/nats-checklist-url.txt
-
-          echo ""
-          echo "Checklist size:"
-          wc -c /tmp/nats-checklist.html
-
-          echo ""
-          echo "References containing AIP:"
-          grep -oiE '.{0,300}AIP.{0,500}' \
-            /tmp/nats-checklist.html \
-            | head -50 || true
-
-          echo ""
-          echo "References containing VRP:"
-          grep -oiE '.{0,300}VRP.{0,500}' \
-            /tmp/nats-checklist.html \
-            | head -50 || true
-
-          echo ""
-          echo "References containing digital-datasets:"
-          grep -oiE '.{0,300}digital-datasets.{0,500}' \
-            /tmp/nats-checklist.html \
-            | head -50 || true
-
-          echo ""
-          echo "All href attributes:"
-          grep -oiE \
-            'href[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
-            /tmp/nats-checklist.html \
-            | head -200 || true
-
-          echo ""
-          echo "References containing EG_AIP:"
-          grep -oiE '.{0,300}EG_AIP.{0,500}' \
-            /tmp/nats-checklist.html \
-            | head -100 || true
-
-          echo ""
-          echo "References containing EG_VRP:"
-          grep -oiE '.{0,300}EG_VRP.{0,500}' \
-            /tmp/nats-checklist.html \
-            | head -100 || true
-
-          echo ""
-          echo "=========================================="
-          echo "END NATS CHECKLIST DEBUG"
-          echo "=========================================="
-
-      - name: Find current NATS datasets
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 - <<'PY'
-          import re
-          from datetime import date
-          from pathlib import Path
-
-          html = Path(
-              "/tmp/nats-checklist.html"
-          ).read_text(
-              encoding="utf-8",
-              errors="replace"
-          )
-
-          dates = []
-
-          month_numbers = {
-              "january": 1,
-              "february": 2,
-              "march": 3,
-              "april": 4,
-              "may": 5,
-              "june": 6,
-              "july": 7,
-              "august": 8,
-              "september": 9,
-              "october": 10,
-              "november": 11,
-              "december": 12
-          }
-
-          for match in re.finditer(
-              r"\b(\d{1,2})\s+"
-              r"(January|February|March|April|May|June|July|August|"
-              r"September|October|November|December)"
-              r"\s+(\d{4})\b",
-              html,
-              flags=re.I
-          ):
-
-              try:
-                  d = date(
-                      int(match.group(3)),
-                      month_numbers[
-                          match.group(2).lower()
-                      ],
-                      int(match.group(1))
-                  )
-              except ValueError:
-                  continue
-
-              if d <= date.today():
-                  dates.append(d)
-
-          for match in re.finditer(
-              r"\b(\d{8})\b",
-              html
-          ):
-
-              value = match.group(1)
-
-              try:
-                  d = date(
-                      int(value[:4]),
-                      int(value[4:6]),
-                      int(value[6:8])
-                  )
-              except ValueError:
-                  continue
-
-              if d <= date.today():
-                  dates.append(d)
-
-          if not dates:
-              raise SystemExit(
-                  "ERROR: Could not determine current NATS dataset date."
-              )
-
-          effective = max(dates)
-
-          suffix = effective.strftime(
-              "%Y%m%d"
-          )
-
-          print("")
-          print("==========================================")
-          print("NATS DATASET DISCOVERY")
-          print("==========================================")
-          print("")
-          print(
-              f"Effective date: {effective}"
-          )
-          print(
-              f"Dataset suffix: {suffix}"
-          )
-          print("")
-
-          print("Expected datasets:")
-          print(
-              f"  EG_AIP_DS_FULL_{suffix}.XML"
-          )
-          print(
-              f"  EG_AIP_DS_FULL_{suffix}.KML"
-          )
-          print(
-              f"  EG_AIP_DS_DIFF_DELTA_{suffix}.XML"
-          )
-          print(
-              f"  EG_VRP_DS_AREA1_FULL_{suffix}.CSV"
-          )
-          print("")
-
-          Path(
-              "/tmp/nats-date.txt"
-          ).write_text(
-              suffix,
-              encoding="utf-8"
-          )
-          PY
-
-      - name: Stop after diagnostics
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo ""
-          echo "=========================================="
-          echo "DIAGNOSTIC RUN COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "The workflow has intentionally stopped here."
-          echo ""
-          echo "No aviation data has been changed."
-          echo "No existing GeoJSON has been replaced."
-          echo ""
-          echo "Use the DEBUG NATS checklist output to identify"
-          echo "the actual NATS download mechanism."
-          echo ""
-
-          exit 1
