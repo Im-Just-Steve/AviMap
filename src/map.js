@@ -61,12 +61,6 @@ export function createMap({ data, onSelect, onReady }) {
     }
   });
 
-  map.on("zoomstart", () => {
-    if (!suppressManualMapInteraction) {
-      aircraftFollowMode = false;
-    }
-  });
-
   map.on("moveend", () => {
     suppressManualMapInteraction = false;
   });
@@ -657,8 +651,8 @@ export function setAircraft(data) {
   updateAircraftTrail(lon, lat);
 
   // Follow the aircraft on every valid telemetry update unless the pilot
-  // has manually panned or zoomed the map. The first fix uses the default
-  // aircraft-centred zoom; subsequent fixes preserve the pilot's zoom.
+  // has manually panned the map. Manual zooming deliberately keeps tracking
+  // active, so the user's chosen zoom is preserved.
   if (aircraftFollowMode) {
     if (!aircraftHasInitialCentre) {
       aircraftHasInitialCentre = true;
@@ -767,19 +761,40 @@ function centreOnAircraft(center, zoom) {
   map.easeTo({ center, zoom, duration: 300, essential: true });
 }
 
+function isAtAircraftCentreZoom() {
+  if (!map) return false;
+  return Math.abs(map.getZoom() - AIRCRAFT_CENTRE_ZOOM) < 0.08;
+}
+
 export function centerOn(position) {
   if (!map || !position) return;
 
-  // The Centre button explicitly re-enables aircraft-follow mode and
-  // restores the default aircraft-centred zoom.
+  // If we're already following and already at the standard 10 NM view,
+  // the target button deliberately does nothing.
+  if (aircraftFollowMode && isAtAircraftCentreZoom()) {
+    return;
+  }
+
+  // Otherwise the target button restores normal aircraft tracking and
+  // the standard approximately-10-NM-radius view.
   aircraftFollowMode = true;
   aircraftHasInitialCentre = true;
-  centreOnAircraft([position.lon, position.lat], AIRCRAFT_CENTRE_ZOOM);
+  centreOnAircraft(
+    [position.lon, position.lat],
+    AIRCRAFT_CENTRE_ZOOM
+  );
 }
 
 export function zoom(delta) {
   if (!map) return;
-  map.zoomTo(Math.max(4, Math.min(14, map.getZoom() + delta)), { duration: 180 });
+
+  // Manual zooming does NOT disable aircraft tracking.
+  // The next telemetry update will therefore keep the aircraft centred
+  // at the user's chosen zoom level.
+  map.zoomTo(
+    Math.max(4, Math.min(14, map.getZoom() + delta)),
+    { duration: 180 }
+  );
 }
 
 export function getMap() {

@@ -371,3 +371,8 @@ the Open Sans glyph set without the invalid comma/space font-stack segment.
 - Aircraft automatically centres at zoom 8.5 when the first valid telemetry is received.
 - Manual panning and zooming are preserved during subsequent telemetry updates.
 - The Centre button returns to the aircraft and resets to zoom 8.5.
+
+
+## v1.2.6
+
+Aircraft follow mode now remains active during manual zooming but is disabled by manual panning. Centre restores tracking and the approximately 10 NM radius view. VRP markers use the ATZ purple colour.\n

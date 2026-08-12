@@ -1,6 +1,6 @@
 {
-  "version": "1.2.5",
+  "version": "1.2.6",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Aircraft follow mode now keeps the map centred on every telemetry position update until the pilot manually pans or zooms. The Centre button re-enables follow mode and restores the default aircraft-centred zoom."
+  "releaseNotes": "Aircraft tracking defaults to an approximately 10 NM radius view; manual panning disables tracking, manual zooming preserves tracking, and Centre restores tracking/10 NM view. VRPs remain visible in the ATZ purple."
 }
