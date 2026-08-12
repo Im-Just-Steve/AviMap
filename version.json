@@ -1,6 +1,6 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed GitHub Pages CORS by serving UK airspace from the AviMap repository via GitHub Actions; ignored incomplete MSFS telemetry instead of passing NaN to MapLibre."
+  "releaseNotes": "PWA now consumes the successfully generated same-origin UK airspace dataset. OpenAIP API access remains server-side in GitHub Actions."
 }

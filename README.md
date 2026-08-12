@@ -174,3 +174,27 @@ OpenAIP documents the country/object export naming convention, including
 The MSFS telemetry path is also hardened: incomplete latitude/longitude
 values are ignored rather than passed to MapLibre, which was causing the
 repeated `Invalid LngLat object: (NaN, NaN)` errors.
+
+
+## v1.0.7 deployment
+
+The OpenAIP → GitHub Actions pipeline has now been successfully tested.
+
+The PWA reads UK airspace only from:
+
+```text
+./data/uk-airspace.geojson
+```
+
+The OpenAIP API key is never used by the browser.
+
+### Important
+
+Do **not** delete or replace `data/uk-airspace.geojson` when copying the PWA
+files into the GitHub repository. The file is intentionally not included in
+this PWA ZIP because GitHub Actions owns and updates it.
+
+The included workflow is the corrected working version using
+`actions/checkout@v5`.
+
+After deployment, the PWA should report a non-zero UK airspace count.
