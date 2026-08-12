@@ -3176,6 +3176,12 @@ jobs:
 
       # ============================================================
       # REPORTING POINTS
+      #
+      # Targeted VRP repair only.
+      #
+      # The NATS AIXM airspace importer above is unchanged.
+      # This step accepts the different CSV layouts/coordinate
+      # representations used by NATS VRP releases.
       # ============================================================
 
       - name: Convert NATS reporting points
@@ -3186,164 +3192,184 @@ jobs:
           import csv
           import json
           import re
-
           from pathlib import Path
 
-
-          source = Path(
-              "/tmp/uk-vrps.csv"
-          )
-
-
+          source = Path("/tmp/uk-vrps.csv")
           output = Path(
-              "/tmp/avimap-data/"
-              "uk-reporting-points.geojson"
+              "/tmp/avimap-data/uk-reporting-points.geojson"
           )
-
 
           raw = source.read_text(
               encoding="utf-8-sig",
               errors="replace"
           )
 
+          if not raw.strip():
+              raise SystemExit(
+                  "ERROR: NATS VRP CSV is empty."
+              )
+
+          # --------------------------------------------------------
+          # Detect delimiter.
+          # --------------------------------------------------------
 
           try:
-
               dialect = csv.Sniffer().sniff(
                   raw[:20000],
                   delimiters=",;\t|"
               )
-
+              delimiter = dialect.delimiter
           except csv.Error:
+              delimiter = ","
 
-              dialect = csv.excel
+          print("")
+          print("==========================================")
+          print("NATS REPORTING POINT IMPORT")
+          print("==========================================")
+          print("Detected delimiter:", repr(delimiter))
 
+          # --------------------------------------------------------
+          # Detect the real header row. Some NATS exports can contain
+          # introductory lines before the CSV header.
+          # --------------------------------------------------------
 
-          reader = csv.DictReader(
-              raw.splitlines(),
-              dialect=dialect
-          )
+          lines = raw.splitlines()
 
-
-          rows = list(
-              reader
-          )
-
-
-          if not rows:
-
-              raise SystemExit(
-                  "ERROR: NATS VRP CSV contains no records."
+          def header_score(line):
+              lower = line.lower()
+              words = (
+                  "latitude",
+                  "longitude",
+                  "lat",
+                  "lon",
+                  "vrp",
+                  "name",
+                  "designator",
+                  "identifier",
+                  "point"
+              )
+              return sum(
+                  1 for word in words if word in lower
               )
 
+          header_index = 0
+          best_score = 0
+
+          for i, line in enumerate(lines[:100]):
+              score = header_score(line)
+              if score > best_score:
+                  best_score = score
+                  header_index = i
+
+          print("Detected header row:", header_index + 1)
+
+          csv_text = "\n".join(lines[header_index:])
+
+          reader = csv.DictReader(
+              csv_text.splitlines(),
+              delimiter=delimiter
+          )
+
+          rows = list(reader)
+
+          if not rows:
+              raise SystemExit(
+                  "ERROR: NATS VRP CSV contains no data rows."
+              )
 
           fields = [
-              field
-              for field in rows[0].keys()
+              field for field in (reader.fieldnames or [])
               if field is not None
           ]
 
+          print("")
+          print("Detected fields:")
+          for field in fields:
+              print("  ", repr(field))
 
-          def normalise(
-              value
-          ):
-
+          def normalise(value):
               return re.sub(
                   r"[^a-z0-9]",
                   "",
-                  str(value).lower()
+                  str(value or "").strip().lower()
               )
 
-
-          normalised = {
-              normalise(field):
-                  field
+          field_map = {
+              normalise(field): field
               for field in fields
           }
 
-
-          def find_field(
-              candidates
-          ):
-
+          def find_field(candidates):
               for candidate in candidates:
+                  key = normalise(candidate)
+                  if key in field_map:
+                      return field_map[key]
 
-                  key = normalise(
-                      candidate
-                  )
-
-
-                  if key in normalised:
-
-                      return normalised[
-                          key
-                      ]
-
-
-              for key, original in normalised.items():
-
+              for key, original in field_map.items():
                   for candidate in candidates:
-
-                      if normalise(
-                          candidate
-                      ) in key:
-
+                      candidate_key = normalise(candidate)
+                      if candidate_key and candidate_key in key:
                           return original
-
 
               return None
 
+          latitude_field = find_field([
+              "Latitude",
+              "Lat",
+              "Latitude DD",
+              "Latitude Decimal",
+              "Latitude DMS",
+              "Lat DMS",
+              "Lat DD",
+              "Lat Dec"
+          ])
 
-          latitude_field = find_field(
-              [
-                  "Latitude",
-                  "Lat"
-              ]
-          )
+          longitude_field = find_field([
+              "Longitude",
+              "Lon",
+              "Long",
+              "Longitude DD",
+              "Longitude Decimal",
+              "Longitude DMS",
+              "Lon DMS",
+              "Lon DD",
+              "Long DD",
+              "Long Dec"
+          ])
 
+          name_field = find_field([
+              "VRP Name",
+              "Name",
+              "Designator",
+              "Identifier",
+              "VRP",
+              "Point Name",
+              "Point"
+          ])
 
-          longitude_field = find_field(
-              [
-                  "Longitude",
-                  "Lon",
-                  "Long"
-              ]
-          )
+          # --------------------------------------------------------
+          # Coordinate parser.
+          #
+          # Supports:
+          #   51.2345
+          #   -1.2345
+          #   512345N
+          #   0012345W
+          #   51 23 45 N
+          #   51:23:45N
+          #   51°23'45"N
+          # --------------------------------------------------------
 
-
-          if (
-              latitude_field is None
-              or
-              longitude_field is None
-          ):
-
-              raise SystemExit(
-                  "ERROR: Could not identify NATS VRP coordinate fields."
-              )
-
-
-          def parse_coordinate(
-              value,
-              latitude
-          ):
-
+          def parse_coordinate(value, latitude):
               if value is None:
-
                   return None
 
-
-              text = str(
-                  value
-              ).strip()
-
+              text = str(value).strip()
 
               if not text:
-
                   return None
 
-
               hemisphere = None
-
 
               match = re.search(
                   r"([NSEW])\s*$",
@@ -3351,281 +3377,304 @@ jobs:
                   flags=re.I
               )
 
-
               if match:
+                  hemisphere = match.group(1).upper()
+                  text = text[:match.start()].strip()
 
-                  hemisphere = (
-                      match.group(
-                          1
-                      ).upper()
-                  )
-
-
-                  text = (
-                      text[
-                          :match.start()
-                      ]
-                      .strip()
-                  )
-
-
+              # Plain decimal degrees.
               try:
-
                   number = float(
-                      text.replace(
-                          ",",
-                          "."
-                      )
+                      text.replace(",", ".")
                   )
 
+                  limit = 90.0 if latitude else 180.0
 
-                  limit = (
-                      90
-                      if latitude
-                      else
-                      180
-                  )
-
-
-                  if (
-                      -limit
-                      <= number
-                      <= limit
-                  ):
-
-                      if hemisphere in {
-                          "S",
-                          "W"
-                      }:
-
-                          number = -abs(
-                              number
-                          )
-
-
+                  if -limit <= number <= limit:
+                      if hemisphere in ("S", "W"):
+                          number = -abs(number)
+                      elif hemisphere in ("N", "E"):
+                          number = abs(number)
                       return number
-
-
               except ValueError:
-
                   pass
 
+              # DMS containing spaces, :, degree/minute/second symbols.
+              cleaned = (
+                  text
+                  .replace("°", " ")
+                  .replace("'", " ")
+                  .replace('"', " ")
+                  .replace(":", " ")
+              )
 
-              if hemisphere:
+              values = re.findall(
+                  r"[-+]?\d+(?:\.\d+)?",
+                  cleaned
+              )
 
-                  cleaned = re.sub(
-                      r"[^0-9.]",
-                      "",
-                      text
-                  )
-
-
+              if len(values) >= 2:
                   try:
+                      parts = [float(v) for v in values[:3]]
 
-                      whole = cleaned.split(
-                          ".",
-                          1
-                      )[0]
+                      degrees = abs(parts[0])
+                      minutes = abs(parts[1])
+                      seconds = abs(parts[2]) if len(parts) >= 3 else 0.0
 
+                      limit = 90.0 if latitude else 180.0
 
-                      if len(
-                          whole
-                      ) >= 6:
-
-                          if latitude:
-
-                              degrees = float(
-                                  cleaned[:2]
-                              )
-
-                              minutes = float(
-                                  cleaned[2:4]
-                              )
-
-                              seconds = float(
-                                  cleaned[4:]
-                              )
-
-                          else:
-
-                              degrees = float(
-                                  cleaned[:3]
-                              )
-
-                              minutes = float(
-                                  cleaned[3:5]
-                              )
-
-                              seconds = float(
-                                  cleaned[5:]
-                              )
-
-
+                      if (
+                          degrees <= limit
+                          and minutes < 60
+                          and seconds < 60
+                      ):
                           number = (
                               degrees
-                              +
-                              minutes / 60.0
-                              +
-                              seconds / 3600.0
+                              + minutes / 60.0
+                              + seconds / 3600.0
                           )
 
-
-                          if hemisphere in {
-                              "S",
-                              "W"
-                          }:
-
+                          if hemisphere in ("S", "W"):
                               number = -number
 
-
                           return number
-
-
-                  except ValueError:
-
+                  except (ValueError, IndexError):
                       pass
 
+              # Compact DMS, e.g. 512345N / 0012345W.
+              compact = re.sub(
+                  r"[^0-9.]",
+                  "",
+                  text
+              )
+
+              if compact:
+                  try:
+                      integer_part, dot, decimal_part = compact.partition(".")
+
+                      if latitude and len(integer_part) >= 6:
+                          degrees = int(integer_part[:2])
+                          minutes = int(integer_part[2:4])
+                          seconds_text = integer_part[4:]
+                      elif not latitude and len(integer_part) >= 7:
+                          degrees = int(integer_part[:3])
+                          minutes = int(integer_part[3:5])
+                          seconds_text = integer_part[5:]
+                      else:
+                          raise ValueError
+
+                      if decimal_part:
+                          seconds_text += "." + decimal_part
+
+                      seconds = float(seconds_text)
+                      limit = 90.0 if latitude else 180.0
+
+                      if (
+                          degrees <= limit
+                          and minutes < 60
+                          and seconds < 60
+                      ):
+                          number = (
+                              degrees
+                              + minutes / 60.0
+                              + seconds / 3600.0
+                          )
+
+                          if hemisphere in ("S", "W"):
+                              number = -number
+
+                          return number
+                  except ValueError:
+                      pass
 
               return None
 
+          # --------------------------------------------------------
+          # If the field names aren't recognisable, inspect values
+          # to identify likely coordinate columns.
+          # --------------------------------------------------------
 
-          name_field = find_field(
-              [
-                  "VRP name",
-                  "Name",
-                  "Designator",
-                  "Identifier",
-                  "VRP"
-              ]
-          )
+          def looks_like_coordinate(value, latitude):
+              if value is None:
+                  return False
 
+              text = str(value).strip()
+
+              if not text:
+                  return False
+
+              if re.search(r"[NSEW]\s*$", text, flags=re.I):
+                  return parse_coordinate(value, latitude) is not None
+
+              try:
+                  number = float(text.replace(",", "."))
+                  limit = 90.0 if latitude else 180.0
+                  return -limit <= number <= limit
+              except ValueError:
+                  return parse_coordinate(value, latitude) is not None
+
+          if latitude_field is None or longitude_field is None:
+              print("")
+              print("Named coordinate fields not both detected.")
+              print("Attempting value-based detection...")
+
+              for field in fields:
+                  sample = [
+                      row.get(field)
+                      for row in rows[:25]
+                  ]
+
+                  hits_lat = sum(
+                      looks_like_coordinate(v, True)
+                      for v in sample
+                  )
+
+                  hits_lon = sum(
+                      looks_like_coordinate(v, False)
+                      for v in sample
+                  )
+
+                  if (
+                      latitude_field is None
+                      and hits_lat >= max(3, len(sample) // 2)
+                  ):
+                      latitude_field = field
+
+                  if (
+                      longitude_field is None
+                      and field != latitude_field
+                      and hits_lon >= max(3, len(sample) // 2)
+                  ):
+                      longitude_field = field
+
+          print("")
+          print("Latitude field:", repr(latitude_field))
+          print("Longitude field:", repr(longitude_field))
+          print("Name field:", repr(name_field))
+
+          if latitude_field is None or longitude_field is None:
+              print("")
+              print("First five VRP rows:")
+              for row in rows[:5]:
+                  print(row)
+
+              raise SystemExit(
+                  "ERROR: Could not identify NATS VRP coordinate fields."
+              )
 
           features = []
-
-
           invalid = 0
 
-
-          for row in rows:
-
-              lat = parse_coordinate(
-                  row.get(
-                      latitude_field
-                  ),
+          for index, row in enumerate(rows, start=1):
+              latitude = parse_coordinate(
+                  row.get(latitude_field),
                   True
               )
 
-
-              lon = parse_coordinate(
-                  row.get(
-                      longitude_field
-                  ),
+              longitude = parse_coordinate(
+                  row.get(longitude_field),
                   False
               )
 
-
               if (
-                  lat is None
-                  or
-                  lon is None
+                  latitude is None
+                  or longitude is None
+                  or not -90 <= latitude <= 90
+                  or not -180 <= longitude <= 180
               ):
-
                   invalid += 1
+
+                  if invalid <= 10:
+                      print("")
+                      print("Invalid VRP row:", index)
+                      print(
+                          "  latitude:",
+                          repr(row.get(latitude_field))
+                      )
+                      print(
+                          "  longitude:",
+                          repr(row.get(longitude_field))
+                      )
 
                   continue
 
-
               properties = {
-                  str(key):
-                      value
+                  str(key).strip(): value
                   for key, value in row.items()
                   if key
               }
 
-
               if name_field:
-
-                  properties[
-                      "name"
-                  ] = str(
-                      row.get(
-                          name_field,
-                          ""
-                      )
+                  name = str(
+                      row.get(name_field, "")
                   ).strip()
+              else:
+                  name = ""
 
+              if not name:
+                  name = f"VRP {index}"
 
-              properties[
-                  "source"
-              ] = (
+              properties["name"] = name
+              properties["ident"] = name
+              properties["source"] = (
                   "NATS Visual Reference Points List"
               )
 
-
-              features.append(
-                  {
-                      "type":
-                          "Feature",
-
-                      "properties":
-                          properties,
-
-                      "geometry":
-                          {
-                              "type":
-                                  "Point",
-
-                              "coordinates":
-                                  [
-                                      lon,
-                                      lat
-                                  ]
-                          }
+              features.append({
+                  "type": "Feature",
+                  "id": name,
+                  "properties": properties,
+                  "geometry": {
+                      "type": "Point",
+                      "coordinates": [
+                          longitude,
+                          latitude
+                      ]
                   }
-              )
+              })
 
+          print("")
+          print("==========================================")
+          print("NATS REPORTING POINT RESULT")
+          print("==========================================")
+          print("CSV records:", len(rows))
+          print("Valid reporting points:", len(features))
+          print("Invalid rows:", invalid)
 
           if not features:
+              print("")
+              print("Detected fields:")
+              for field in fields:
+                  print("  ", repr(field))
+
+              print("")
+              print("First five rows:")
+              for row in rows[:5]:
+                  print(row)
 
               raise SystemExit(
                   "ERROR: Zero valid NATS reporting points."
               )
 
+          output.parent.mkdir(
+              parents=True,
+              exist_ok=True
+          )
 
           output.write_text(
               json.dumps(
                   {
-                      "type":
-                          "FeatureCollection",
-
-                      "features":
-                          features
+                      "type": "FeatureCollection",
+                      "features": features
                   },
                   ensure_ascii=False,
-                  separators=(
-                      ",",
-                      ":"
-                  )
+                  separators=(",", ":")
               ),
               encoding="utf-8"
           )
 
-
           print("")
-          print(
-              "NATS reporting points:",
-              len(features)
-          )
-
-          print(
-              "Invalid rows:",
-              invalid
-          )
-
-          print(
-              "Output:",
-              output
-          )
+          print("Output:", output)
+          print("GeoJSON features:", len(features))
 
           PY
 
