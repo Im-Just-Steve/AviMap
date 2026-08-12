@@ -108,3 +108,18 @@ AviMap is not currently an approved navigation product.
   positioning transform. Heading rotation is now applied to an inner icon,
   preventing repeated telemetry updates from producing marker rendering
   artefacts or a stack of markers.
+
+
+## v1.0.3 airspace fix
+
+The previous build assumed an OpenAIP GeoJSON export. OpenAIP's documented
+airspace export format uses XML/AIP 1.1 with `AIRSPACES > ASP`, `CATEGORY`,
+`NAME`, altitude limits and `GEOMETRY > POLYGON`. AviMap v1.0.3 now loads the
+UK `gb_asp.xml` export and converts its polygons to GeoJSON before rendering
+them in MapLibre.
+
+The airspace layer also recognises the OpenAIP `CATEGORY` field and uses a
+stronger fill/outline so the overlay is visible at normal UK map scales.
+
+The current source is development data and is not a substitute for current
+UK AIP/AIS or NOTAM information.

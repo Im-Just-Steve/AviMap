@@ -174,7 +174,7 @@ function addAirspace() {
         "RMZ", "#7c5a2c",
         "#52736e"
       ],
-      "fill-opacity": 0.12
+      "fill-opacity": 0.16
     }
   });
 
@@ -195,7 +195,7 @@ function addAirspace() {
         "#52736e"
       ],
       "line-width": 1.4,
-      "line-opacity": 0.85
+      "line-opacity": 0.95
     }
   });
 
@@ -227,7 +227,7 @@ function normaliseGeoJson(input) {
         properties: {
           ...(f.properties || {}),
           name: f.properties?.name || f.properties?.AN || f.properties?.designator || `AREA ${i + 1}`,
-          type: f.properties?.type || f.properties?.class || f.properties?.AC || ""
+          type: f.properties?.type || f.properties?.category || f.properties?.class || f.properties?.AC || ""
         }
       }))
     };

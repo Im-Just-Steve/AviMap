@@ -1,6 +1,6 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed map touch pan/zoom and aircraft marker rendering."
+  "releaseNotes": "Fixed UK airspace ingestion by parsing the OpenAIP XML export and improved overlay visibility."
 }
