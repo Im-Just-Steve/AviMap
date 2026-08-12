@@ -1,4 +1,4 @@
-name: Test NATS AIP download paths
+name: Find NATS AIP download path
 
 on:
   workflow_dispatch:
@@ -7,58 +7,80 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  discover:
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Test NATS AIP download paths
+      - name: Discover NATS AIP download paths
         shell: bash
         run: |
           set -u
 
           DATE="20260806"
 
+          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
+
           echo "=========================================="
-          echo "NATS AIP DOWNLOAD TEST"
+          echo "NATS AIP DOWNLOAD DISCOVERY"
           echo "=========================================="
           echo ""
-          echo "Testing AIRAC date: $DATE"
+          echo "AIRAC: $DATE"
           echo ""
+
+          echo "Known filenames:"
+          echo "  EG_AIP_DS_FULL_${DATE}.XML"
+          echo "  EG_AIP_DS_FULL_${DATE}.KML"
+          echo "  EG_AIP_DS_DIFF_DELTA_${DATE}.XML"
+          echo ""
+
+          echo "=========================================="
+          echo "TESTING POSSIBLE FILE LOCATIONS"
+          echo "=========================================="
+
+          PATHS=(
+            ""
+            "AIP"
+            "AIP/"
+            "AIP%20Dataset"
+            "AIP%20Data"
+            "AIP_Data"
+            "AIP_Dataset"
+            "AIXM"
+            "AIXM51"
+            "ICAO"
+            "UK-ICAO-AIP"
+            "UK_ICAO_AIP"
+            "AIPDS"
+            "AIP_DS"
+            "AIP-Dataset"
+            "AIP_Data_Set"
+            "UK_AIP"
+            "AIP%20DS"
+          )
 
           FILES=(
             "EG_AIP_DS_FULL_${DATE}.XML"
             "EG_AIP_DS_FULL_${DATE}.KML"
             "EG_AIP_DS_DIFF_DELTA_${DATE}.XML"
+            "EG_AIP_DS_FULL_${DATE}_XML.zip"
+            "EG_AIP_DS_FULL_${DATE}_KML.zip"
+            "EG_AIP_DS_DIFF_DELTA_${DATE}_XML.zip"
+            "EG_AIP_DS_FULL_${DATE}.XML.zip"
+            "EG_AIP_DS_FULL_${DATE}.KML.zip"
           )
 
-          PATHS=(
-            "AIP"
-            "AIP/"
-            "AIP%20Data"
-            "AIP_Data"
-            "aip"
-            "AIP-Dataset"
-            "AIP_Dataset"
-            "AIP%20Dataset"
-            "AIP%20Data%20Set"
-            "AIP_Data_Set"
-            "AIXM"
-            "AIXM51"
-          )
-
-          BASE="https://nats-uk.ead-it.com/cms-nats/export/sites/default/en/Publications/digital-datasets"
+          FOUND=0
 
           for DIR in "${PATHS[@]}"; do
 
-            echo ""
-            echo "------------------------------------------"
-            echo "Testing directory: $DIR"
-            echo "------------------------------------------"
-
             for FILE in "${FILES[@]}"; do
 
-              URL="$BASE/$DIR/$FILE"
+              if [ -n "$DIR" ]; then
+                URL="$BASE/$DIR/$FILE"
+              else
+                URL="$BASE/$FILE"
+              fi
 
               STATUS=$(
                 curl \
@@ -71,7 +93,17 @@ jobs:
                   "$URL"
               )
 
-              echo "$STATUS  $URL"
+              if [ "$STATUS" != "404" ]; then
+
+                echo ""
+                echo "***** POSSIBLE MATCH *****"
+                echo "HTTP: $STATUS"
+                echo "URL:  $URL"
+                echo ""
+
+                FOUND=1
+
+              fi
 
             done
 
@@ -79,5 +111,104 @@ jobs:
 
           echo ""
           echo "=========================================="
-          echo "TEST COMPLETE"
+          echo "TESTING NATS EXPORT ROOT"
           echo "=========================================="
+          echo ""
+
+          ROOT_STATUS=$(
+            curl \
+              --silent \
+              --output /tmp/nats-root.html \
+              --write-out "%{http_code}" \
+              --location \
+              --max-time 30 \
+              --user-agent "AviMap/1.0" \
+              "$BASE/"
+          )
+
+          echo "HTTP: $ROOT_STATUS"
+          echo ""
+
+          if [ -s /tmp/nats-root.html ]; then
+
+            echo "Root response size:"
+            wc -c /tmp/nats-root.html
+
+            echo ""
+            echo "References containing AIP:"
+            grep \
+              -oiE \
+              '.{0,200}AIP.{0,400}' \
+              /tmp/nats-root.html \
+              | head -100 \
+              || true
+
+            echo ""
+            echo "References containing EG_AIP:"
+            grep \
+              -oiE \
+              '.{0,200}EG_AIP.{0,400}' \
+              /tmp/nats-root.html \
+              | head -100 \
+              || true
+
+            echo ""
+            echo "References containing KML:"
+            grep \
+              -oiE \
+              '.{0,200}KML.{0,400}' \
+              /tmp/nats-root.html \
+              | head -100 \
+              || true
+
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "TESTING NATS DIGITAL-DATASETS DIRECTORY"
+          echo "=========================================="
+          echo ""
+
+          curl \
+            --silent \
+            --show-error \
+            --location \
+            --max-time 30 \
+            --user-agent "AviMap/1.0" \
+            "$BASE/" \
+            --output /tmp/nats-directory.html \
+            || true
+
+          if [ -s /tmp/nats-directory.html ]; then
+
+            echo "Directory response:"
+            wc -c /tmp/nats-directory.html
+
+            echo ""
+            echo "All references:"
+            grep \
+              -oiE \
+              'href[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
+              /tmp/nats-directory.html \
+              | head -200 \
+              || true
+
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "RESULT"
+          echo "=========================================="
+          echo ""
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "No candidate returned a non-404 response."
+            echo ""
+            echo "This confirms the AIP dataset is not exposed"
+            echo "through the conventional static paths tested."
+          else
+            echo "At least one candidate returned a non-404 response."
+          fi
+
+          echo ""
+          echo "Discovery complete."
