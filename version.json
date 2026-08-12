@@ -1,6 +1,6 @@
 {
-  "version": "1.2.4",
+  "version": "1.2.5",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "VRPs now use the same purple as ATZs. Aircraft centring now uses a fixed 8.5 zoom: the map centres automatically when aircraft telemetry is first received, manual pan/zoom is preserved, and the Centre button returns to the aircraft at the default zoom."
+  "releaseNotes": "Aircraft follow mode now keeps the map centred on every telemetry position update until the pilot manually pans or zooms. The Centre button re-enables follow mode and restores the default aircraft-centred zoom."
 }

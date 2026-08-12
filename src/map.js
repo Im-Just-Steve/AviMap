@@ -9,6 +9,9 @@ let aircraftTrailPending = false;
 const AIRCRAFT_TRAIL_COLOR = "#2A9D8F";
 
 let aircraftMarker;
+let aircraftFollowMode = true;
+let aircraftHasInitialCentre = false;
+let suppressManualMapInteraction = false;
 let selectedFeature;
 let dataState;
 let onFeatureSelect;
@@ -49,6 +52,24 @@ export function createMap({ data, onSelect, onReady }) {
   });
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+  // Aircraft-follow mode remains active until the pilot manually pans or zooms.
+  // Programmatic centring is explicitly suppressed so it does not disable follow mode.
+  map.on("dragstart", () => {
+    if (!suppressManualMapInteraction) {
+      aircraftFollowMode = false;
+    }
+  });
+
+  map.on("zoomstart", () => {
+    if (!suppressManualMapInteraction) {
+      aircraftFollowMode = false;
+    }
+  });
+
+  map.on("moveend", () => {
+    suppressManualMapInteraction = false;
+  });
 
   map.on("load", () => {
     addAirspace();
@@ -634,6 +655,19 @@ export function setAircraft(data) {
   }
 
   updateAircraftTrail(lon, lat);
+
+  // Follow the aircraft on every valid telemetry update unless the pilot
+  // has manually panned or zoomed the map. The first fix uses the default
+  // aircraft-centred zoom; subsequent fixes preserve the pilot's zoom.
+  if (aircraftFollowMode) {
+    if (!aircraftHasInitialCentre) {
+      aircraftHasInitialCentre = true;
+      centreOnAircraft([lon, lat], AIRCRAFT_CENTRE_ZOOM);
+    } else {
+      centreOnAircraft([lon, lat], map.getZoom());
+    }
+  }
+
   return true;
 }
 
@@ -727,9 +761,20 @@ export function clearAircraftTrail() {
 }
 
 
+function centreOnAircraft(center, zoom) {
+  if (!map) return;
+  suppressManualMapInteraction = true;
+  map.easeTo({ center, zoom, duration: 300, essential: true });
+}
+
 export function centerOn(position) {
   if (!map || !position) return;
-  map.easeTo({ center: [position.lon, position.lat], zoom: AIRCRAFT_CENTRE_ZOOM, duration: 450, essential: true });
+
+  // The Centre button explicitly re-enables aircraft-follow mode and
+  // restores the default aircraft-centred zoom.
+  aircraftFollowMode = true;
+  aircraftHasInitialCentre = true;
+  centreOnAircraft([position.lon, position.lat], AIRCRAFT_CENTRE_ZOOM);
 }
 
 export function zoom(delta) {
