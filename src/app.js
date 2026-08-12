@@ -249,11 +249,20 @@ function updateRouteUI() {
 }
 
 function updateAircraft(data) {
-  const lat = Number(data?.lat);
-  const lon = Number(data?.lon);
-  const altitude = Number(data?.altitude);
-  const groundspeed = Number(data?.groundspeed);
-  const heading = Number(data?.heading);
+  // The Companion currently serialises its C# telemetry properties as
+  // PascalCase (Lat, Lon, Altitude, Groundspeed, Heading). Older connector
+  // builds used lowercase names. Accept both so the PWA is wire-compatible
+  // with the current Companion.
+  const lat = Number(data?.lat ?? data?.Lat);
+  const lon = Number(data?.lon ?? data?.Lon);
+  const altitude = Number(data?.altitude ?? data?.Altitude);
+  const groundspeed = Number(
+    data?.groundspeed ??
+    data?.Groundspeed ??
+    data?.groundSpeed ??
+    data?.GroundSpeed
+  );
+  const heading = Number(data?.heading ?? data?.Heading);
 
   if (
     !Number.isFinite(lat) ||

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.13",
+  "version": "1.0.13.1",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Automatic Companion discovery over the local network via avimap.local, with localhost fallback. Fixed aircraft marker creation and added telemetry diagnostics."
+  "releaseNotes": "Fixed aircraft telemetry compatibility with the current Companion's PascalCase JSON properties (Lat/Lon/Altitude/Groundspeed/Heading). Service worker now activates and claims clients immediately."
 }

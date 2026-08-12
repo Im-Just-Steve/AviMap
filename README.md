@@ -292,3 +292,17 @@ step is to add a secure local transport rather than hard-coding an IP address.
 
 The aircraft marker was also fixed: the marker element is now explicitly
 created before MapLibre receives the first valid telemetry position.
+
+
+## v1.0.13.1 telemetry fix
+
+The current Windows Companion sends JSON using C#'s default PascalCase
+property names (`Lat`, `Lon`, `Altitude`, `Groundspeed`, `Heading`). The PWA
+now accepts both PascalCase and lowercase telemetry fields.
+
+This was the cause of the console message:
+
+`AviMap: invalid aircraft telemetry ignored`
+
+The values themselves were valid; the PWA was simply reading the wrong
+property names.
