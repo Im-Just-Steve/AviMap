@@ -14,16 +14,17 @@ jobs:
 
     steps:
 
-      # ------------------------------------------------------------
+      # ============================================================
       # CHECKOUT
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      # ------------------------------------------------------------
+
+      # ============================================================
       # OPENAIP AIRSPACE
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Download UK airspace from OpenAIP
         env:
@@ -65,6 +66,7 @@ jobs:
             exit 1
           fi
 
+
       - name: Download all UK airspace pages
         env:
           OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
@@ -86,8 +88,13 @@ jobs:
             echo "Downloading airspace page $PAGE of $TOTAL_PAGES..."
 
             if [ "$PAGE" -eq 1 ]; then
-              cp /tmp/openaip-page-1.json "/tmp/page-${PAGE}.json"
+
+              cp \
+                /tmp/openaip-page-1.json \
+                "/tmp/page-${PAGE}.json"
+
             else
+
               curl \
                 --fail \
                 --silent \
@@ -98,6 +105,7 @@ jobs:
                 -H "Accept: application/json" \
                 "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
                 -o "/tmp/page-${PAGE}.json"
+
             fi
 
             COUNT=$(jq '.items | length' "/tmp/page-${PAGE}.json")
@@ -123,9 +131,10 @@ jobs:
             exit 1
           fi
 
-      # ------------------------------------------------------------
+
+      # ============================================================
       # CONVERT AIRSPACE TO GEOJSON
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Convert airspace to GeoJSON
         run: |
@@ -151,11 +160,17 @@ jobs:
             let geometry = item.geometry;
 
             if (typeof geometry === "string") {
+
               try {
+
                 geometry = JSON.parse(geometry);
+
               } catch {
+
                 continue;
+
               }
+
             }
 
             if (
@@ -163,42 +178,78 @@ jobs:
               !geometry.type ||
               !geometry.coordinates
             ) {
+
               continue;
+
             }
 
             features.push({
+
               type: "Feature",
 
               id: item._id || item.id,
 
               properties: {
+
                 id: item._id || item.id || "",
-                name: item.name || "Unknown airspace",
-                type: item.type ?? "",
-                icaoClass: item.icaoClass ?? "",
-                activity: item.activity ?? "",
-                upperLimit: item.upperLimit ?? null,
-                lowerLimit: item.lowerLimit ?? null,
-                country: item.country ?? "GB"
+
+                name:
+                  item.name ||
+                  "Unknown airspace",
+
+                type:
+                  item.type ??
+                  "",
+
+                icaoClass:
+                  item.icaoClass ??
+                  "",
+
+                activity:
+                  item.activity ??
+                  "",
+
+                upperLimit:
+                  item.upperLimit ??
+                  null,
+
+                lowerLimit:
+                  item.lowerLimit ??
+                  null,
+
+                country:
+                  item.country ??
+                  "GB"
+
               },
 
               geometry
+
             });
+
           }
 
           if (!features.length) {
+
             throw new Error(
               "Airspace conversion produced zero features."
             );
+
           }
 
           fs.writeFileSync(
+
             "data/uk-airspace.geojson",
 
             JSON.stringify({
-              type: "FeatureCollection",
+
+              type:
+                "FeatureCollection",
+
               features
+
             })
+
           );
 
           console.log(
@@ -207,11 +258,12 @@ jobs:
 
           NODE
 
-      # ------------------------------------------------------------
-      # NATS VRPs
-      # ------------------------------------------------------------
 
-        - name: Find current NATS VRP dataset
+      # ============================================================
+      # FIND CURRENT NATS VRP DATASET
+      # ============================================================
+
+      - name: Find current NATS VRP dataset
         run: |
           set -e
 
@@ -231,61 +283,97 @@ jobs:
           python3 <<'PY'
 
           import re
+
           from datetime import datetime, timezone
+
           from urllib.parse import urljoin
 
+
           html = open(
+
               "/tmp/nats.html",
+
               encoding="utf-8",
+
               errors="replace"
+
           ).read()
 
-          # Find all NATS VRP ZIP files.
+
+          # Find all links to NATS VRP ZIP datasets.
+
           hrefs = re.findall(
+
               r'href=["\']([^"\']+)["\']',
+
               html,
+
               flags=re.I
+
           )
 
+
           datasets = []
+
 
           for href in hrefs:
 
               match = re.search(
+
                   r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
+
                   href,
+
                   flags=re.I
+
               )
 
+
               if not match:
+
                   continue
 
+
               date_text = match.group(1)
+
 
               try:
 
                   effective_date = datetime.strptime(
+
                       date_text,
+
                       "%Y%m%d"
+
                   ).date()
 
               except ValueError:
 
                   continue
 
+
               datasets.append(
+
                   (
                       effective_date,
                       href
                   )
+
               )
+
 
           if not datasets:
 
-              print("ERROR: No NATS VRP ZIP datasets found.")
+              print(
+                  "ERROR: No NATS VRP ZIP datasets found."
+              )
 
               print("")
-              print("VRP links found:")
+
+              print(
+                  "VRP links found:"
+              )
+
 
               for href in hrefs:
 
@@ -293,14 +381,21 @@ jobs:
 
                       print(href)
 
+
               raise SystemExit(1)
+
 
           today = datetime.now(
               timezone.utc
           ).date()
 
+
           print("")
-          print("Available NATS VRP datasets:")
+
+          print(
+              "Available NATS VRP datasets:"
+          )
+
 
           for date, href in sorted(datasets):
 
@@ -310,59 +405,113 @@ jobs:
 
                   marker = " <-- current/available"
 
+
               print(
                   f"  {date}  {href}{marker}"
               )
 
-          # Select the latest dataset whose effective date is not in the
-          # future. This prevents us accidentally using next AIRAC data.
+
+          # Select the latest dataset whose effective date
+          # is not in the future.
+
           current = [
+
               item
+
               for item in datasets
+
               if item[0] <= today
+
           ]
+
 
           if current:
 
               effective_date, href = max(
+
                   current,
+
                   key=lambda item: item[0]
+
               )
 
           else:
 
-              # Safety fallback if NATS only publishes a future dataset.
+              # Safety fallback if NATS only publishes
+              # future datasets.
+
               effective_date, href = min(
+
                   datasets,
+
                   key=lambda item: item[0]
+
               )
 
+
           url = urljoin(
+
               "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html",
+
               href
+
+          )
+
+
+          print("")
+
+          print(
+              "=========================================="
+          )
+
+          print(
+              "SELECTED NATS VRP DATASET"
+          )
+
+          print(
+              "=========================================="
           )
 
           print("")
-          print("==========================================")
-          print("SELECTED NATS VRP DATASET")
-          print("==========================================")
-          print("")
-          print("Effective date:", effective_date)
-          print("URL:", url)
+
+          print(
+              "Effective date:",
+              effective_date
+          )
+
+          print(
+              "URL:",
+              url
+          )
+
           print("")
 
+
           open(
+
               "/tmp/nats-vrp-url.txt",
+
               "w"
+
           ).write(url)
 
+
           open(
+
               "/tmp/nats-vrp-date.txt",
+
               "w"
-          ).write(str(effective_date))
+
+          ).write(
+              str(effective_date)
+          )
 
           PY
 
+
+      # ============================================================
+      # DOWNLOAD NATS VRP ZIP
+      # ============================================================
 
       - name: Download NATS VRPs
         run: |
@@ -374,10 +523,15 @@ jobs:
           echo "Downloading NATS VRP dataset"
           echo "=========================================="
 
+          echo ""
+
           echo "URL:"
           echo "$VRP_URL"
 
+          echo ""
+
           mkdir -p /tmp/nats-vrp
+
 
           curl \
             --fail \
@@ -389,90 +543,105 @@ jobs:
             "$VRP_URL" \
             -o /tmp/nats-vrp.zip
 
+
           if [ ! -s /tmp/nats-vrp.zip ]; then
+
             echo "ERROR: NATS VRP ZIP is empty."
+
             exit 1
+
           fi
 
-          echo ""
-          echo "Downloaded ZIP:"
-          ls -lh /tmp/nats-vrp.zip
 
           echo ""
+
+          echo "Downloaded ZIP:"
+
+          ls -lh /tmp/nats-vrp.zip
+
+
+          echo ""
+
           echo "ZIP contents:"
+
           unzip -l /tmp/nats-vrp.zip
+
+
+          echo ""
+
+          echo "Extracting..."
 
           unzip \
             -o \
             /tmp/nats-vrp.zip \
             -d /tmp/nats-vrp
 
-          echo ""
-          echo "Extracted files:"
-          find /tmp/nats-vrp -type f -print
 
-          # Locate the CSV inside the ZIP.
-          VRP_CSV=$(find /tmp/nats-vrp \
+          echo ""
+
+          echo "Extracted files:"
+
+          find \
+            /tmp/nats-vrp \
             -type f \
-            \( -iname "*.csv" -o -iname "*.CSV" \) \
+            -print
+
+
+          # Find the CSV contained inside the ZIP.
+
+          VRP_CSV=$(find \
+            /tmp/nats-vrp \
+            -type f \
+            \( \
+              -iname "*.csv" \
+              -o \
+              -iname "*.CSV" \
+            \) \
             | head -n 1)
 
+
           if [ -z "$VRP_CSV" ]; then
+
             echo ""
+
             echo "ERROR: No CSV file found inside NATS VRP ZIP."
+
             exit 1
+
           fi
 
+
           echo ""
+
           echo "Selected VRP CSV:"
+
           echo "$VRP_CSV"
 
-          cp "$VRP_CSV" /tmp/uk-vrps.csv
+
+          cp \
+            "$VRP_CSV" \
+            /tmp/uk-vrps.csv
+
 
           echo ""
+
           echo "CSV size:"
+
           wc -c /tmp/uk-vrps.csv
 
+
           echo ""
+
           echo "First 10 lines:"
-          head -n 10 /tmp/uk-vrps.csv
-        run: |
-          set -e
 
-          VRP_URL=$(cat /tmp/nats-vrp-url.txt)
+          head \
+            -n 10 \
+            /tmp/uk-vrps.csv
 
-          echo "=========================================="
-          echo "Downloading NATS VRP dataset"
-          echo "=========================================="
 
-          echo "$VRP_URL"
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --retry 3 \
-            --retry-delay 5 \
-            -L \
-            "$VRP_URL" \
-            -o /tmp/uk-vrps.csv
-
-          if [ ! -s /tmp/uk-vrps.csv ]; then
-            echo "ERROR: NATS VRP CSV is empty."
-            exit 1
-          fi
-
-          echo ""
-          echo "Downloaded VRP CSV:"
-          wc -c /tmp/uk-vrps.csv
-
-          echo ""
-          echo "First 10 lines:"
-          head -n 10 /tmp/uk-vrps.csv
-
-      # ------------------------------------------------------------
-      # CONVERT VRPS
-      # ------------------------------------------------------------
+      # ============================================================
+      # CONVERT NATS VRPS TO GEOJSON
+      # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
         run: |
@@ -481,39 +650,59 @@ jobs:
           python3 <<'PY'
 
           import csv
+
           import json
+
           import re
 
           from pathlib import Path
 
+
           raw = Path(
+
               "/tmp/uk-vrps.csv"
+
           ).read_text(
+
               encoding="utf-8-sig",
+
               errors="replace"
+
           )
+
 
           try:
 
               dialect = csv.Sniffer().sniff(
+
                   raw[:8192],
+
                   delimiters=",;\t"
+
               )
 
           except csv.Error:
 
               dialect = csv.excel
 
+
           rows = list(
+
               csv.DictReader(
+
                   raw.splitlines(),
+
                   dialect=dialect
+
               )
+
           )
+
 
           print(
               f"CSV records: {len(rows)}"
           )
+
 
           if not rows:
 
@@ -521,29 +710,47 @@ jobs:
                   "NATS VRP CSV contains no records."
               )
 
-          fields = list(rows[0].keys())
+
+          fields = list(
+              rows[0].keys()
+          )
+
 
           print("")
+
           print("CSV fields:")
 
+
           for field in fields:
+
               print(
                   f"  {field}"
               )
 
+
           def norm(value):
 
               return re.sub(
+
                   r"[^a-z0-9]",
+
                   "",
+
                   str(value).strip().lower()
+
               )
 
+
           normalised = {
+
               norm(field): field
+
               for field in fields
+
               if field
+
           }
+
 
           def find_field(*names):
 
@@ -555,139 +762,273 @@ jobs:
 
                       return normalised[key]
 
+
               for key, original in normalised.items():
 
                   for name in names:
 
                       n = norm(name)
 
-                      if n in key or key in n:
+                      if (
+                          n in key
+                          or key in n
+                      ):
 
                           return original
 
+
               return None
 
+
           name_field = find_field(
+
               "VRP Name",
+
               "VRP",
+
               "Name",
+
               "Designator",
+
               "Identifier",
+
               "Point Name",
+
               "Point"
+
           )
+
 
           lat_field = find_field(
+
               "Latitude",
+
               "Lat",
+
               "Latitude DD",
+
               "Latitude Decimal"
+
           )
+
 
           lon_field = find_field(
+
               "Longitude",
+
               "Lon",
+
               "Long",
+
               "Longitude DD",
+
               "Longitude Decimal"
+
+          )
+
+
+          print("")
+
+          print("Detected fields:")
+
+          print(
+              "  Name:",
+              name_field
+          )
+
+          print(
+              "  Latitude:",
+              lat_field
+          )
+
+          print(
+              "  Longitude:",
+              lon_field
           )
 
           print("")
-          print("Detected fields:")
-          print("  Name:", name_field)
-          print("  Latitude:", lat_field)
-          print("  Longitude:", lon_field)
-          print("")
+
 
           if not lat_field or not lon_field:
 
               raise SystemExit(
-                  "Could not identify latitude/longitude fields."
+
+                  "Could not identify "
+                  "latitude/longitude fields."
+
               )
 
-          def parse_coord(value, latitude):
+
+          def parse_coord(
+              value,
+              latitude
+          ):
 
               if value is None:
+
                   return None
 
-              text = str(value).strip()
+
+              text = str(
+                  value
+              ).strip()
+
 
               if not text:
+
                   return None
 
+
+              # ------------------------------------------------
               # Decimal degrees
+              # ------------------------------------------------
 
               try:
 
                   number = float(
-                      text.replace(",", ".")
+
+                      text.replace(
+                          ",",
+                          "."
+                      )
+
                   )
 
-                  limit = 90 if latitude else 180
 
-                  if -limit <= number <= limit:
+                  limit = (
+                      90
+                      if latitude
+                      else 180
+                  )
+
+
+                  if (
+                      -limit
+                      <= number
+                      <= limit
+                  ):
 
                       return number
+
 
               except ValueError:
 
                   pass
 
+
+              # ------------------------------------------------
               # DMS / DDM
+              # ------------------------------------------------
 
               upper = (
+
                   text.upper()
-                  .replace("°", " ")
-                  .replace("'", " ")
-                  .replace('"', " ")
+
+                  .replace(
+                      "°",
+                      " "
+                  )
+
+                  .replace(
+                      "'",
+                      " "
+                  )
+
+                  .replace(
+                      '"',
+                      " "
+                  )
+
               )
 
+
               direction = None
+
 
               if upper[-1:] in "NSEW":
 
                   direction = upper[-1]
+
                   upper = upper[:-1]
 
+
               numbers = re.findall(
+
                   r"[-+]?\d+(?:[.,]\d+)?",
+
                   upper
+
               )
+
 
               if not numbers:
 
                   return None
 
+
               values = [
+
                   float(
-                      n.replace(",", ".")
+                      n.replace(
+                          ",",
+                          "."
+                      )
                   )
+
                   for n in numbers
+
               ]
 
-              result = abs(values[0])
+
+              result = abs(
+                  values[0]
+              )
+
 
               if len(values) > 1:
 
-                  result += abs(values[1]) / 60
+                  result += (
+                      abs(values[1])
+                      / 60
+                  )
+
 
               if len(values) > 2:
 
-                  result += abs(values[2]) / 3600
+                  result += (
+                      abs(values[2])
+                      / 3600
+                  )
 
-              if direction in ("S", "W"):
+
+              if direction in (
+                  "S",
+                  "W"
+              ):
 
                   result = -result
 
-              limit = 90 if latitude else 180
 
-              if result < -limit or result > limit:
+              limit = (
+                  90
+                  if latitude
+                  else 180
+              )
+
+
+              if (
+                  result < -limit
+                  or result > limit
+              ):
 
                   return None
 
+
               return result
 
+
           features = []
+
 
           for index, row in enumerate(
               rows,
@@ -695,174 +1036,275 @@ jobs:
           ):
 
               latitude = parse_coord(
-                  row.get(lat_field),
+
+                  row.get(
+                      lat_field
+                  ),
+
                   True
+
               )
+
 
               longitude = parse_coord(
-                  row.get(lon_field),
+
+                  row.get(
+                      lon_field
+                  ),
+
                   False
+
               )
 
-              if latitude is None or longitude is None:
+
+              if (
+                  latitude is None
+                  or longitude is None
+              ):
 
                   continue
+
 
               if name_field:
 
                   name = str(
-                      row.get(name_field, "")
+
+                      row.get(
+                          name_field,
+                          ""
+                      )
+
                   ).strip()
 
               else:
 
                   name = ""
 
+
               if not name:
 
-                  name = f"VRP {index}"
+                  name = (
+                      f"VRP {index}"
+                  )
+
 
               properties = {
+
                   str(k).strip(): v
+
                   for k, v in row.items()
+
                   if k
+
               }
 
+
               properties["name"] = name
+
               properties["ident"] = name
+
 
               features.append({
 
-                  "type": "Feature",
+                  "type":
+                      "Feature",
 
-                  "properties": properties,
+                  "properties":
+                      properties,
 
                   "geometry": {
 
-                      "type": "Point",
+                      "type":
+                          "Point",
 
                       "coordinates": [
+
                           longitude,
+
                           latitude
+
                       ]
 
                   }
 
               })
 
+
+          print("")
+
           print(
               f"Valid VRPs: {len(features)}"
           )
 
+
           if not features:
 
               raise SystemExit(
-                  "VRP conversion produced zero valid points."
+
+                  "VRP conversion produced "
+                  "zero valid points."
+
               )
 
+
           Path(
+
               "data/uk-reporting-points.geojson"
+
           ).write_text(
 
               json.dumps({
 
-                  "type": "FeatureCollection",
+                  "type":
+                      "FeatureCollection",
 
-                  "features": features
+                  "features":
+                      features
 
               }),
 
               encoding="utf-8"
+
           )
 
           PY
 
-      # ------------------------------------------------------------
-      # VALIDATE
-      # ------------------------------------------------------------
+
+      # ============================================================
+      # VALIDATE GENERATED DATA
+      # ============================================================
 
       - name: Validate generated data
         run: |
           set -e
 
           AIRSPACE_COUNT=$(
-            jq '.features | length' \
-            data/uk-airspace.geojson
+            jq \
+              '.features | length' \
+              data/uk-airspace.geojson
           )
+
 
           VRP_COUNT=$(
-            jq '.features | length' \
-            data/uk-reporting-points.geojson
+            jq \
+              '.features | length' \
+              data/uk-reporting-points.geojson
           )
 
+
           echo ""
+
           echo "=========================================="
+
           echo "FINAL DATA COUNTS"
+
           echo "=========================================="
+
           echo ""
+
           echo "Airspaces : $AIRSPACE_COUNT"
+
           echo "VRPs      : $VRP_COUNT"
+
           echo ""
+
 
           if [ "$AIRSPACE_COUNT" -eq 0 ]; then
+
             echo "ERROR: zero airspaces."
+
             exit 1
+
           fi
+
 
           if [ "$VRP_COUNT" -eq 0 ]; then
+
             echo "ERROR: zero VRPs."
+
             exit 1
+
           fi
 
-      # ------------------------------------------------------------
-      # COMMIT
-      # ------------------------------------------------------------
+
+      # ============================================================
+      # COMMIT CHANGES
+      # ============================================================
 
       - name: Commit updated aviation data
         run: |
           set -e
 
-          git config user.name "AviMap Data Bot"
+          git config \
+            user.name \
+            "AviMap Data Bot"
 
-          git config user.email \
+
+          git config \
+            user.email \
             "actions@users.noreply.github.com"
 
+
           echo ""
-          echo "Checking for changes..."
+
+          echo "=========================================="
+
+          echo "CHECKING FOR DATA CHANGES"
+
+          echo "=========================================="
+
 
           git status --short
+
 
           git add \
             data/uk-airspace.geojson \
             data/uk-reporting-points.geojson
 
+
           if git diff --cached --quiet; then
 
             echo ""
+
             echo "=========================================="
+
             echo "NO DATA CHANGES DETECTED"
+
             echo "=========================================="
+
             echo ""
+
             echo "The downloaded datasets are identical"
+
             echo "to the versions already in Git."
+
             echo ""
 
           else
 
             echo ""
+
             echo "=========================================="
+
             echo "DATA CHANGES DETECTED"
+
             echo "=========================================="
+
             echo ""
 
+
             git diff --cached --stat
+
 
             git commit \
               -m "Update UK aviation data"
 
+
             git push
 
+
             echo ""
+
             echo "Aviation data committed successfully."
 
           fi
