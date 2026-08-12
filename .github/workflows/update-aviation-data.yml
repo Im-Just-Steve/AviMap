@@ -2069,6 +2069,1078 @@ jobs:
           )
 
           PY
+      # ============================================================
+      # TRACE EGUL CIRCLES BACK TO THEIR OWNING AIRSPACE
+      #
+      # Targeted forensic step.
+      #
+      # The previous forensic run found multiple CircleByCenterPoint
+      # geometries at the exact Lakenheath MATZ/ATZ centre.
+      #
+      # This step works backwards from those geometry objects and
+      # identifies every Airspace / AirspaceVolume /
+      # AirspaceGeometryComponent that references them.
+      #
+      # It deliberately does NOT alter the generated aviation data.
+      # ============================================================
+
+      - name: Trace EGUL centre geometries to owning airspace
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import math
+          import re
+          import xml.etree.ElementTree as ET
+
+          from collections import deque
+          from pathlib import Path
+
+
+          XML_FILE = "/tmp/uk-aip.xml"
+
+          TARGET_LAT = 52.4094028
+          TARGET_LON = 0.5610111
+
+          SEARCH_NM = 0.15
+
+          OUTPUT_FILE = (
+              "/tmp/egul-centre-geometry-owners.txt"
+          )
+
+
+          print("")
+          print(
+              "=========================================="
+          )
+
+          print(
+              "TRACE EGUL CENTRE GEOMETRIES"
+          )
+
+          print(
+              "=========================================="
+          )
+
+          print("")
+          print(
+              "Target:",
+              TARGET_LAT,
+              TARGET_LON
+          )
+
+          print(
+              "Search radius:",
+              SEARCH_NM,
+              "NM"
+          )
+
+
+          tree = ET.parse(
+              XML_FILE
+          )
+
+          root = tree.getroot()
+
+
+          def local(tag):
+              return tag.rsplit(
+                  "}",
+                  1
+              )[-1]
+
+
+          def attr(element, name):
+              if element is None:
+                  return None
+
+              wanted = name.lower()
+
+              for key, value in element.attrib.items():
+                  if local(key).lower() == wanted:
+                      return value
+
+              return None
+
+
+          parent_map = {}
+
+          for parent in root.iter():
+              for child in parent:
+                  parent_map[child] = parent
+
+
+          # --------------------------------------------------------
+          # Build identifier index.
+          # --------------------------------------------------------
+
+          id_index = {}
+
+          for element in root.iter():
+
+              for key, value in element.attrib.items():
+
+                  lname = local(key).lower()
+
+                  if lname in {
+                      "id",
+                      "uuid",
+                      "identifier"
+                  }:
+
+                      if value:
+                          value = value.strip()
+
+                          id_index[value] = element
+                          id_index[value.lstrip("#")] = element
+
+                          if "#" in value:
+                              id_index[
+                                  value.rsplit(
+                                      "#",
+                                      1
+                                  )[-1]
+                              ] = element
+
+
+          def resolve(value):
+
+              if not value:
+                  return None
+
+              candidates = [
+                  value,
+                  value.lstrip("#")
+              ]
+
+              if "#" in value:
+                  candidates.append(
+                      value.rsplit(
+                          "#",
+                          1
+                      )[-1]
+                  )
+
+              for candidate in candidates:
+                  if candidate in id_index:
+                      return id_index[candidate]
+
+              return None
+
+
+          def href(element):
+              return attr(
+                  element,
+                  "href"
+              )
+
+
+          # --------------------------------------------------------
+          # Build reverse reference index.
+          #
+          # referenced element -> elements that reference it
+          # --------------------------------------------------------
+
+          reverse_refs = {}
+
+          for element in root.iter():
+
+              target = resolve(
+                  href(
+                      element
+                  )
+              )
+
+              if target is None:
+                  continue
+
+              reverse_refs.setdefault(
+                  id(target),
+                  []
+              ).append(
+                  element
+              )
+
+
+          # --------------------------------------------------------
+          # Coordinate parser.
+          # --------------------------------------------------------
+
+          def parse_numbers(text):
+              if not text:
+                  return []
+
+              result = []
+
+              for token in re.split(
+                  r"[\s,]+",
+                  text.strip()
+              ):
+                  if not token:
+                      continue
+
+                  try:
+                      result.append(
+                          float(
+                              token
+                          )
+                      )
+                  except ValueError:
+                      pass
+
+              return result
+
+
+          def srs(element):
+
+              current = element
+
+              for _ in range(50):
+
+                  if current is None:
+                      break
+
+                  value = attr(
+                      current,
+                      "srsName"
+                  )
+
+                  if value:
+                      return value
+
+                  current = parent_map.get(
+                      current
+                  )
+
+              return "EPSG:4326"
+
+
+          def to_lon_lat(
+              first,
+              second,
+              srs_name
+          ):
+
+              name = (
+                  srs_name
+                  or
+                  "EPSG:4326"
+              ).upper()
+
+              # Geographic latitude/longitude input is normally
+              # latitude first in AIXM, while GeoJSON is lon/lat.
+
+              if (
+                  "4326" in name
+                  and
+                  "CRS84" not in name
+              ):
+                  return (
+                      second,
+                      first
+                  )
+
+              return (
+                  first,
+                  second
+              )
+
+
+          def distance_nm(
+              lat1,
+              lon1,
+              lat2,
+              lon2
+          ):
+
+              dlat = math.radians(
+                  lat2 - lat1
+              )
+
+              dlon = math.radians(
+                  lon2 - lon1
+              )
+
+              a = (
+                  math.sin(dlat / 2) ** 2
+                  +
+                  math.cos(
+                      math.radians(lat1)
+                  )
+                  *
+                  math.cos(
+                      math.radians(lat2)
+                  )
+                  *
+                  math.sin(dlon / 2) ** 2
+              )
+
+              c = 2 * math.atan2(
+                  math.sqrt(a),
+                  math.sqrt(
+                      max(
+                          0.0,
+                          1.0 - a
+                      )
+                  )
+              )
+
+              return (
+                  6371008.8
+                  * c
+                  / 1852.0
+              )
+
+
+          # --------------------------------------------------------
+          # Find every coordinate-bearing element close to EGUL.
+          # --------------------------------------------------------
+
+          coordinate_matches = []
+
+
+          for element in root.iter():
+
+              name = local(
+                  element.tag
+              )
+
+              if name not in {
+                  "pos",
+                  "posList",
+                  "coordinates"
+              }:
+                  continue
+
+              values = parse_numbers(
+                  element.text
+              )
+
+              if len(values) < 2:
+                  continue
+
+
+              pairs = []
+
+
+              if name == "posList":
+
+                  dimension = int(
+                      attr(
+                          element,
+                          "srsDimension"
+                      )
+                      or
+                      "2"
+                  )
+
+                  dimension = max(
+                      2,
+                      dimension
+                  )
+
+                  for index in range(
+                      0,
+                      len(values),
+                      dimension
+                  ):
+
+                      pair = values[
+                          index:
+                          index + dimension
+                      ]
+
+                      if len(pair) >= 2:
+                          pairs.append(
+                              pair[:2]
+                          )
+
+              else:
+
+                  pairs.append(
+                      values[:2]
+                  )
+
+
+              for pair in pairs:
+
+                  lon, lat = to_lon_lat(
+                      pair[0],
+                      pair[1],
+                      srs(
+                          element
+                      )
+                  )
+
+
+                  distance = distance_nm(
+                      TARGET_LAT,
+                      TARGET_LON,
+                      lat,
+                      lon
+                  )
+
+
+                  if distance <= SEARCH_NM:
+
+                      coordinate_matches.append(
+                          {
+                              "element":
+                                  element,
+
+                              "tag":
+                                  name,
+
+                              "id":
+                                  attr(
+                                      element,
+                                      "id"
+                                  ),
+
+                              "href":
+                                  href(
+                                      element
+                                  ),
+
+                              "latitude":
+                                  lat,
+
+                              "longitude":
+                                  lon,
+
+                              "distance_nm":
+                                  distance
+                          }
+                      )
+
+
+          print("")
+          print(
+              "Coordinate-bearing elements near EGUL:",
+              len(
+                  coordinate_matches
+              )
+          )
+
+
+          # --------------------------------------------------------
+          # Find geometry objects associated with those coordinates.
+          # --------------------------------------------------------
+
+          geometry_objects = []
+
+          seen_geometry = set()
+
+
+          for match in coordinate_matches:
+
+              element = match[
+                  "element"
+              ]
+
+              current = element
+
+              while current is not None:
+
+                  tag = local(
+                      current.tag
+                  )
+
+                  if tag in {
+                      "CircleByCenterPoint",
+                      "ArcByCenterPoint",
+                      "Curve",
+                      "Surface",
+                      "PolygonPatch",
+                      "Ring",
+                      "LinearRing"
+                  }:
+
+                      marker = id(
+                          current
+                      )
+
+                      if marker not in seen_geometry:
+
+                          seen_geometry.add(
+                              marker
+                          )
+
+                          geometry_objects.append(
+                              current
+                          )
+
+                      break
+
+                  current = parent_map.get(
+                      current
+                  )
+
+
+          # --------------------------------------------------------
+          # Also specifically find CircleByCenterPoint objects whose
+          # own centre is at EGUL, regardless of nesting.
+          # --------------------------------------------------------
+
+          for element in root.iter():
+
+              if local(
+                  element.tag
+              ) != "CircleByCenterPoint":
+
+                  continue
+
+
+              for child in element.iter():
+
+                  if local(
+                      child.tag
+                  ) != "pos":
+
+                      continue
+
+
+                  values = parse_numbers(
+                      child.text
+                  )
+
+                  if len(values) < 2:
+                      continue
+
+
+                  lon, lat = to_lon_lat(
+                      values[0],
+                      values[1],
+                      srs(
+                          child
+                      )
+                  )
+
+
+                  distance = distance_nm(
+                      TARGET_LAT,
+                      TARGET_LON,
+                      lat,
+                      lon
+                  )
+
+
+                  if distance <= SEARCH_NM:
+
+                      marker = id(
+                          element
+                      )
+
+                      if marker not in seen_geometry:
+
+                          seen_geometry.add(
+                              marker
+                          )
+
+                          geometry_objects.append(
+                              element
+                          )
+
+
+          print(
+              "Geometry objects to trace:",
+              len(
+                  geometry_objects
+              )
+          )
+
+
+          # --------------------------------------------------------
+          # Trace each geometry backwards through references.
+          #
+          # We also walk the XML parent chain because some AIXM
+          # structures contain geometry directly rather than via href.
+          # --------------------------------------------------------
+
+          airspaces = [
+              element
+              for element in root.iter()
+              if local(
+                  element.tag
+              ) == "Airspace"
+          ]
+
+
+          airspace_by_id = {
+              id(element):
+                  element
+              for element in airspaces
+          }
+
+
+          results = []
+
+
+          for geometry in geometry_objects:
+
+              geometry_id = (
+                  attr(
+                      geometry,
+                      "id"
+                  )
+                  or
+                  "(no-id)"
+              )
+
+
+              geometry_tag = local(
+                  geometry.tag
+              )
+
+
+              # Breadth-first search backwards through references.
+
+              queue = deque(
+                  [geometry]
+              )
+
+              seen = set()
+
+              owners = []
+
+
+              while queue:
+
+                  current = queue.popleft()
+
+                  marker = id(
+                      current
+                  )
+
+                  if marker in seen:
+                      continue
+
+                  seen.add(
+                      marker
+                  )
+
+
+                  if marker in airspace_by_id:
+
+                      owners.append(
+                          current
+                      )
+
+
+                  # XML parent.
+
+                  parent = parent_map.get(
+                      current
+                  )
+
+                  if parent is not None:
+
+                      queue.append(
+                          parent
+                      )
+
+
+                  # Anything that references this object.
+
+                  for referrer in reverse_refs.get(
+                      marker,
+                      []
+                  ):
+
+                      queue.append(
+                          referrer
+                      )
+
+
+              # Remove duplicates.
+
+              unique_owners = []
+
+              seen_owners = set()
+
+              for owner in owners:
+
+                  marker = id(
+                      owner
+                  )
+
+                  if marker in seen_owners:
+                      continue
+
+                  seen_owners.add(
+                      marker
+                  )
+
+                  unique_owners.append(
+                      owner
+                  )
+
+
+              results.append(
+                  {
+                      "geometry":
+                          geometry,
+
+                      "owners":
+                          unique_owners
+                  }
+              )
+
+
+          # --------------------------------------------------------
+          # Print detailed results.
+          # --------------------------------------------------------
+
+          output_lines = []
+
+
+          def emit(
+              line=""
+          ):
+
+              print(line)
+
+              output_lines.append(
+                  str(line)
+              )
+
+
+          emit("")
+          emit(
+              "=========================================="
+          )
+          emit(
+              "EGUL GEOMETRY OWNERS"
+          )
+          emit(
+              "=========================================="
+          )
+
+
+          for number, result in enumerate(
+              results,
+              start=1
+          ):
+
+              geometry = result[
+                  "geometry"
+              ]
+
+              owners = result[
+                  "owners"
+              ]
+
+
+              emit("")
+              emit(
+                  f"GEOMETRY {number}"
+              )
+
+              emit(
+                  "  Tag: " +
+                  local(
+                      geometry.tag
+                  )
+              )
+
+              emit(
+                  "  ID: " +
+                  str(
+                      attr(
+                          geometry,
+                          "id"
+                      )
+                      or
+                      "(none)"
+                  )
+              )
+
+              emit(
+                  "  href: " +
+                  str(
+                      href(
+                          geometry
+                      )
+                      or
+                      "(none)"
+                  )
+              )
+
+              emit(
+                  "  Owning Airspaces: " +
+                  str(
+                      len(
+                          owners
+                      )
+                  )
+              )
+
+
+              if not owners:
+
+                  emit(
+                      "  ** NO AIRSPACE OWNER FOUND **"
+                  )
+
+
+              for owner_number, airspace in enumerate(
+                  owners,
+                  start=1
+              ):
+
+                  def text_value(
+                      names
+                  ):
+
+                      wanted = {
+                          value.lower()
+                          for value in names
+                      }
+
+                      for node in airspace.iter():
+
+                          if (
+                              local(
+                                  node.tag
+                              ).lower()
+                              in wanted
+                              and
+                              node.text
+                          ):
+
+                              value = node.text.strip()
+
+                              if value:
+                                  return value
+
+                      return ""
+
+
+                  emit("")
+                  emit(
+                      f"  OWNER {owner_number}"
+                  )
+
+                  emit(
+                      "    gml:id: " +
+                      str(
+                          attr(
+                              airspace,
+                              "id"
+                          )
+                          or
+                          "(none)"
+                      )
+                  )
+
+                  emit(
+                      "    designator: " +
+                      repr(
+                          text_value(
+                              {
+                                  "designator"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    name: " +
+                      repr(
+                          text_value(
+                              {
+                                  "name"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    type: " +
+                      repr(
+                          text_value(
+                              {
+                                  "type"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    localType: " +
+                      repr(
+                          text_value(
+                              {
+                                  "localType"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    class: " +
+                      repr(
+                          text_value(
+                              {
+                                  "class"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    controlType: " +
+                      repr(
+                          text_value(
+                              {
+                                  "controlType"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    status: " +
+                      repr(
+                          text_value(
+                              {
+                                  "status"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    operation: " +
+                      repr(
+                          text_value(
+                              {
+                                  "operation"
+                              }
+                          )
+                      )
+                  )
+
+                  emit(
+                      "    feature count: " +
+                      str(
+                          len(
+                              list(
+                                  airspace.iter()
+                              )
+                          )
+                      )
+                  )
+
+
+                  # Print every relevant descendant tag/value
+                  # to expose how NATS actually models the object.
+
+                  relevant = {
+                      "AirspaceVolume",
+                      "AirspaceGeometryComponent",
+                      "horizontalProjection",
+                      "Surface",
+                      "CompositeSurface",
+                      "PolygonPatch",
+                      "Curve",
+                      "CircleByCenterPoint",
+                      "ArcByCenterPoint",
+                      "Ring",
+                      "LinearRing",
+                      "radius",
+                      "angle",
+                      "startAngle",
+                      "endAngle",
+                      "operation",
+                      "controlType",
+                      "type",
+                      "localType",
+                      "class"
+                  }
+
+
+                  emit(
+                      "    relevant descendants:"
+                  )
+
+
+                  for node in airspace.iter():
+
+                      tag = local(
+                          node.tag
+                      )
+
+                      if tag not in relevant:
+                          continue
+
+
+                      value = (
+                          node.text.strip()
+                          if node.text
+                          else
+                          ""
+                      )
+
+
+                      node_id = attr(
+                          node,
+                          "id"
+                      )
+
+
+                      node_href = href(
+                          node
+                      )
+
+
+                      emit(
+                          "      " +
+                          tag +
+                          " | " +
+                          "id=" +
+                          str(
+                              node_id
+                              or
+                              ""
+                          ) +
+                          " | href=" +
+                          str(
+                              node_href
+                              or
+                              ""
+                          ) +
+                          " | value=" +
+                          repr(
+                              value
+                          )
+                      )
+
+
+          Path(
+              OUTPUT_FILE
+          ).write_text(
+              "\n".join(
+                  output_lines
+              ),
+              encoding="utf-8"
+          )
+
+
+          print("")
+          print(
+              "Saved trace:",
+              OUTPUT_FILE
+          )
+
+          print("")
+          print(
+              "Trace complete."
+          )
+
+          PY
+
+
       - name: Download NATS VRP dataset
         run: |
           set -euo pipefail
