@@ -112,10 +112,10 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   border-radius: 2px;
 }
 
+.legend-red { background: #c62828; }
 .legend-blue { background: #1769aa; }
 .legend-magenta { background: #b0188a; }
 .legend-purple { background: #8b2c83; }
-.legend-blue-dash { background: repeating-linear-gradient(90deg, #1769aa 0 5px, transparent 5px 8px); }
 
 @media (max-width: 600px) {
   .airspace-legend {

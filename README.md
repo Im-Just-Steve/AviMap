@@ -245,3 +245,13 @@ Updated to the requested UK VFR colour reference:
 - RMZ: blue
 - Prohibited / Restricted / Danger: purple
 - Class G / other: grey
+
+
+## v1.0.11 revised airspace palette
+
+Requested presentation:
+- Class A: purple (same reference colour previously used for P/R/D)
+- Prohibited / Restricted / Danger: red
+- ATZ: magenta
+- TMZ: magenta with dashed boundary
+- MATZ / RMZ / controlled airspace: blue

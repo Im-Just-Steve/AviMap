@@ -1,6 +1,6 @@
 {
-  "version": "1.0.10",
+  "version": "1.0.11",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Corrected UK VFR airspace colours: ATZ and TMZ are magenta; MATZ and RMZ are blue."
+  "releaseNotes": "Revised UK VFR airspace palette: Class A purple, P/R/D red, ATZ/TMZ magenta, controlled/MATZ/RMZ blue. TMZ boundaries are dashed."
 }
