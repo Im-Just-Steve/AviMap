@@ -379,6 +379,10 @@ jobs:
           )
 
 
+          # --------------------------------------------------------
+          # AIP AIRAC
+          # --------------------------------------------------------
+
           aip_matches = re.findall(
               r"EG_AIP_DS_FULL_(\d{8})\.XML",
               checklist_text,
@@ -425,6 +429,10 @@ jobs:
               key=lambda item: item[0]
           )
 
+
+          # --------------------------------------------------------
+          # VRP AIRAC
+          # --------------------------------------------------------
 
           vrp_matches = re.findall(
               r"EG_VRP_DS_AREA1_FULL_(\d{8})\.CSV",
@@ -485,6 +493,10 @@ jobs:
           )
 
 
+          # --------------------------------------------------------
+          # DISCOVER DOWNLOAD LINKS
+          # --------------------------------------------------------
+
           checklist_links = parse_links(
               checklist_url,
               checklist_body
@@ -505,7 +517,7 @@ jobs:
           except Exception as exc:
 
               print(
-                  "WARNING: dataset index unavailable:",
+                  "WARNING: Dataset index unavailable:",
                   exc
               )
 
@@ -557,6 +569,10 @@ jobs:
                   )
 
 
+          # --------------------------------------------------------
+          # FOLLOW AIP DATASET PAGES
+          # --------------------------------------------------------
+
           for url, text in list(
               aip_links
           ):
@@ -565,11 +581,17 @@ jobs:
 
 
               if not (
-                  lower.endswith(".html")
+                  lower.endswith(
+                      ".html"
+                  )
                   or
-                  lower.endswith(".htm")
+                  lower.endswith(
+                      ".htm"
+                  )
                   or
-                  lower.endswith("/")
+                  lower.endswith(
+                      "/"
+                  )
               ):
 
                   continue
@@ -684,6 +706,7 @@ jobs:
           )
 
           for url, text in aip_links:
+
               print(
                   text,
                   "=>",
@@ -697,6 +720,7 @@ jobs:
           )
 
           for url, text in vrp_links:
+
               print(
                   text,
                   "=>",
@@ -721,10 +745,10 @@ jobs:
 
 
       # ============================================================
-      # DOWNLOAD AIP
+      # DOWNLOAD NATS AIP
       # ============================================================
 
-      - name: Download NATS AIP
+      - name: Download NATS AIP dataset
         run: |
           set -euo pipefail
 
@@ -741,7 +765,7 @@ jobs:
 
 
             echo ""
-            echo "Testing:"
+            echo "Testing NATS AIP URL:"
             echo "${URL}"
 
 
@@ -789,7 +813,7 @@ jobs:
 
 
               echo ""
-              echo "AIP archive:"
+              echo "AIP archive contents:"
 
               find \
                 /tmp/nats-aip \
@@ -830,7 +854,8 @@ jobs:
 
           if [ -z "${FOUND}" ]; then
 
-            echo "ERROR: AIP download failed."
+            echo ""
+            echo "ERROR: NATS AIP download failed."
 
             exit 1
 
@@ -860,10 +885,10 @@ jobs:
 
 
       # ============================================================
-      # DOWNLOAD VRP
+      # DOWNLOAD NATS VRP
       # ============================================================
 
-      - name: Download NATS VRP
+      - name: Download NATS VRP dataset
         run: |
           set -euo pipefail
 
@@ -880,7 +905,7 @@ jobs:
 
 
             echo ""
-            echo "Testing:"
+            echo "Testing NATS VRP URL:"
             echo "${URL}"
 
 
@@ -960,7 +985,8 @@ jobs:
 
           if [ -z "${FOUND}" ]; then
 
-            echo "ERROR: VRP download failed."
+            echo ""
+            echo "ERROR: NATS VRP download failed."
 
             exit 1
 
@@ -978,12 +1004,15 @@ jobs:
 
 
       # ============================================================
-      # AIXM → GEOJSON
+      # IMPORT ALL NATS AIRSPACE
       #
-      # NO AIRSPACE FILTERING.
+      # IMPORTANT:
       #
-      # The purpose of this converter is to faithfully reconstruct
-      # the horizontal geometry contained in NATS AIXM.
+      # NO CLASSIFICATION FILTERING.
+      #
+      # The converter deliberately starts with the known-good
+      # geometry-discovery approach and then adds reference
+      # resolution and curve handling around it.
       # ============================================================
 
       - name: Convert ALL NATS AIXM airspace
@@ -1004,9 +1033,7 @@ jobs:
           from pathlib import Path
 
 
-          XML_FILE = (
-              "/tmp/uk-aip.xml"
-          )
+          XML_FILE = "/tmp/uk-aip.xml"
 
           OUTPUT_FILE = (
               "/tmp/avimap-data/"
@@ -1021,7 +1048,7 @@ jobs:
 
 
           # ========================================================
-          # XML
+          # XML SETUP
           # ========================================================
 
           tree = ET.parse(
@@ -1031,7 +1058,9 @@ jobs:
           root = tree.getroot()
 
 
-          def local(tag):
+          def local(
+              tag
+          ):
 
               return tag.rsplit(
                   "}",
@@ -1063,6 +1092,10 @@ jobs:
               return None
 
 
+          # --------------------------------------------------------
+          # Parent map
+          # --------------------------------------------------------
+
           parent_map = {}
 
 
@@ -1075,7 +1108,65 @@ jobs:
                   ] = parent
 
 
+          # --------------------------------------------------------
+          # Build a very broad ID index.
+          #
+          # AIXM/GML references can use gml:id, uuid or other local
+          # identifiers. We index all of them.
+          # --------------------------------------------------------
+
           id_index = {}
+
+
+          def add_id(
+              value,
+              element
+          ):
+
+              if not value:
+                  return
+
+
+              value = value.strip()
+
+
+              if not value:
+                  return
+
+
+              id_index[
+                  value
+              ] = element
+
+
+              id_index[
+                  value.lstrip("#")
+              ] = element
+
+
+              if value.startswith(
+                  "urn:uuid:"
+              ):
+
+                  short = value[
+                      len("urn:uuid:"):
+                  ]
+
+                  id_index[
+                      short
+                  ] = element
+
+
+              if "#" in value:
+
+                  fragment = value.rsplit(
+                      "#",
+                      1
+                  )[-1]
+
+                  id_index[
+                      fragment
+                  ] = element
 
 
           for element in root.iter():
@@ -1089,17 +1180,20 @@ jobs:
 
                   if lname in {
                       "id",
-                      "uuid"
-                  } and value:
+                      "uuid",
+                      "identifier",
+                      "href"
+                  }:
 
-                      id_index[
-                          value.lstrip("#")
-                      ] = element
+                      add_id(
+                          value,
+                          element
+                      )
 
 
           print("")
           print(
-              "Indexed XML objects:",
+              "Indexed XML references:",
               len(
                   id_index
               )
@@ -1107,10 +1201,10 @@ jobs:
 
 
           # ========================================================
-          # XLink
+          # REFERENCE RESOLUTION
           # ========================================================
 
-          def href_target(
+          def href_value(
               element
           ):
 
@@ -1118,61 +1212,133 @@ jobs:
                   return None
 
 
-              href = None
-
-
               for key, value in element.attrib.items():
 
-                  if (
-                      local(
-                          key
-                      ).lower()
-                      ==
-                      "href"
-                  ):
-
-                      href = value
-
-                      break
+                  lname = local(
+                      key
+                  ).lower()
 
 
-              if not href:
+                  if lname == "href":
+
+                      return value
+
+
+              return None
+
+
+          def resolve_reference(
+              value
+          ):
+
+              if not value:
                   return None
 
 
-              reference = href.split(
-                  "#",
-                  1
-              )[-1].strip()
+              candidates = []
 
 
-              if not reference:
-                  return None
+              value = value.strip()
 
 
-              return id_index.get(
-                  reference
+              candidates.append(
+                  value
+              )
+
+              candidates.append(
+                  value.lstrip("#")
               )
 
 
-          def resolve_chain(
-              element,
-              maximum=40
+              if "#" in value:
+
+                  candidates.append(
+                      value.rsplit(
+                          "#",
+                          1
+                      )[-1]
+                  )
+
+
+              if value.startswith(
+                  "urn:uuid:"
+              ):
+
+                  candidates.append(
+                      value[
+                          len("urn:uuid:"):
+                      ]
+                  )
+
+
+              for candidate in candidates:
+
+                  if candidate in id_index:
+
+                      return id_index[
+                          candidate
+                      ]
+
+
+              # Last-resort suffix matching.
+
+              short = candidates[-1]
+
+
+              for key, element in id_index.items():
+
+                  if key.endswith(
+                      short
+                  ):
+
+                      return element
+
+
+              return None
+
+
+          def reference_target(
+              element
+          ):
+
+              return resolve_reference(
+                  href_value(
+                      element
+                  )
+              )
+
+
+          # ========================================================
+          # RECURSIVE GRAPH WALK
+          #
+          # This is the important recovery mechanism.
+          #
+          # Instead of assuming the geometry is directly below
+          # Airspace, we walk all reachable AIXM objects.
+          # ========================================================
+
+          def reachable_objects(
+              start,
+              maximum=20000
           ):
 
               result = []
 
+              queue = [
+                  start
+              ]
+
               seen = set()
 
-              current = element
 
+              while queue:
 
-              for _ in range(
-                  maximum
-              ):
+                  current = queue.pop()
+
 
                   if current is None:
-                      break
+
+                      continue
 
 
                   marker = id(
@@ -1181,7 +1347,8 @@ jobs:
 
 
                   if marker in seen:
-                      break
+
+                      continue
 
 
                   seen.add(
@@ -1194,23 +1361,49 @@ jobs:
                   )
 
 
-                  target = href_target(
+                  if len(
+                      result
+                  ) >= maximum:
+
+                      break
+
+
+                  # The current object itself may be an xlink
+                  # reference.
+
+                  target = reference_target(
                       current
                   )
 
 
-                  if target is None:
-                      break
+                  if target is not None:
+
+                      queue.append(
+                          target
+                      )
 
 
-                  current = target
+                  # Follow every xlink underneath it.
+
+                  for child in current.iter():
+
+                      target = reference_target(
+                          child
+                      )
+
+
+                      if target is not None:
+
+                          queue.append(
+                              target
+                          )
 
 
               return result
 
 
           # ========================================================
-          # COORDINATES
+          # COORDINATE PARSING
           # ========================================================
 
           def inherited_srs(
@@ -1221,10 +1414,11 @@ jobs:
 
 
               for _ in range(
-                  50
+                  60
               ):
 
                   if current is None:
+
                       break
 
 
@@ -1235,6 +1429,7 @@ jobs:
 
 
                   if value:
+
                       return value
 
 
@@ -1280,15 +1475,16 @@ jobs:
                   return 2
 
 
-          def parse_numbers(
+          def number_list(
               text
           ):
 
               if not text:
+
                   return []
 
 
-              result = []
+              values = []
 
 
               for token in re.split(
@@ -1297,12 +1493,13 @@ jobs:
               ):
 
                   if not token:
+
                       continue
 
 
                   try:
 
-                      result.append(
+                      values.append(
                           float(
                               token
                           )
@@ -1313,10 +1510,46 @@ jobs:
                       pass
 
 
-              return result
+              return values
 
 
-          def positions(
+          def convert_xy(
+              first,
+              second,
+              srs
+          ):
+
+              srs = (
+                  srs
+                  or
+                  "EPSG:4326"
+              ).upper()
+
+
+              # AIXM commonly uses EPSG:4326 where the coordinate
+              # order is latitude, longitude.
+              #
+              # GeoJSON always wants longitude, latitude.
+
+              if (
+                  "4326" in srs
+                  and
+                  "CRS84" not in srs
+              ):
+
+                  return [
+                      second,
+                      first
+                  ]
+
+
+              return [
+                  first,
+                  second
+              ]
+
+
+          def extract_positions(
               element
           ):
 
@@ -1333,15 +1566,21 @@ jobs:
                   if name == "posList":
 
                       if not node.text:
+
                           continue
 
 
-                      values = parse_numbers(
+                      values = number_list(
                           node.text
                       )
 
 
                       dim = dimension(
+                          node
+                      )
+
+
+                      srs = inherited_srs(
                           node
                       )
 
@@ -1358,92 +1597,56 @@ jobs:
                           ]
 
 
-                          if len(point) < 2:
+                          if len(
+                              point
+                          ) < 2:
+
                               continue
 
 
-                          first = point[0]
-                          second = point[1]
-
-
-                          srs = inherited_srs(
-                              node
-                          ).upper()
-
-
-                          if (
-                              "4326" in srs
-                              and
-                              "CRS84" not in srs
-                          ):
-
-                              result.append(
-                                  [
-                                      second,
-                                      first
-                                  ]
+                          result.append(
+                              convert_xy(
+                                  point[0],
+                                  point[1],
+                                  srs
                               )
-
-                          else:
-
-                              result.append(
-                                  [
-                                      first,
-                                      second
-                                  ]
-                              )
+                          )
 
 
                   elif name == "pos":
 
                       if not node.text:
+
                           continue
 
 
-                      values = parse_numbers(
+                      values = number_list(
                           node.text
                       )
 
 
-                      if len(values) < 2:
+                      if len(
+                          values
+                      ) < 2:
+
                           continue
 
 
-                      first = values[0]
-                      second = values[1]
-
-
-                      srs = inherited_srs(
-                          node
-                      ).upper()
-
-
-                      if (
-                          "4326" in srs
-                          and
-                          "CRS84" not in srs
-                      ):
-
-                          result.append(
-                              [
-                                  second,
-                                  first
-                              ]
+                      result.append(
+                          convert_xy(
+                              values[0],
+                              values[1],
+                              inherited_srs(
+                                  node
+                              )
                           )
-
-                      else:
-
-                          result.append(
-                              [
-                                  first,
-                                  second
-                              ]
-                          )
+                      )
 
 
                   elif name == "coordinates":
 
                       if not node.text:
+
                           continue
 
 
@@ -1457,7 +1660,10 @@ jobs:
                           )
 
 
-                          if len(bits) < 2:
+                          if len(
+                              bits
+                          ) < 2:
+
                               continue
 
 
@@ -1476,49 +1682,32 @@ jobs:
                               continue
 
 
-                          srs = inherited_srs(
-                              node
-                          ).upper()
-
-
-                          if (
-                              "4326" in srs
-                              and
-                              "CRS84" not in srs
-                          ):
-
-                              result.append(
-                                  [
-                                      second,
-                                      first
-                                  ]
+                          result.append(
+                              convert_xy(
+                                  first,
+                                  second,
+                                  inherited_srs(
+                                      node
+                                  )
                               )
-
-                          else:
-
-                              result.append(
-                                  [
-                                      first,
-                                      second
-                                  ]
-                              )
+                          )
 
 
               return result
 
 
           # ========================================================
-          # ANGLES / RADIUS
+          # NUMERIC HELPERS
           # ========================================================
 
-          def numeric_value(
+          def numeric(
               element,
               names
           ):
 
               wanted = {
-                  name.lower()
-                  for name in names
+                  x.lower()
+                  for x in names
               }
 
 
@@ -1541,7 +1730,7 @@ jobs:
 
                       except ValueError:
 
-                          continue
+                          pass
 
 
               return None
@@ -1566,10 +1755,12 @@ jobs:
 
 
               if radius_node is None:
+
                   return None
 
 
               if not radius_node.text:
+
                   return None
 
 
@@ -1618,29 +1809,15 @@ jobs:
 
 
           # ========================================================
-          # AIXM ARC
-          #
-          # AIXM bearings are clockwise from true north.
-          #
-          # Therefore:
-          #
-          # latitude  = centre + north/south component
-          # longitude = centre + east/west component
-          #
-          # 0 degrees = north
-          # 90 degrees = east
-          # 180 degrees = south
-          # 270 degrees = west
+          # CIRCLE
           # ========================================================
 
-          def arc_by_center_points(
+          def make_circle(
               element
           ):
 
               center = None
 
-
-              # Find the actual centre position.
 
               for node in element.iter():
 
@@ -1651,14 +1828,14 @@ jobs:
                       continue
 
 
-                  points = positions(
+                  pts = extract_positions(
                       node
                   )
 
 
-                  if points:
+                  if pts:
 
-                      center = points[0]
+                      center = pts[0]
 
                       break
 
@@ -1676,219 +1853,19 @@ jobs:
               if radius is None:
 
                   return []
-
-
-              start = numeric_value(
-                  element,
-                  {
-                      "startAngle"
-                  }
-              )
-
-
-              end = numeric_value(
-                  element,
-                  {
-                      "endAngle"
-                  }
-              )
-
-
-              if (
-                  start is None
-                  or
-                  end is None
-              ):
-
-                  return []
-
-
-              # AIXM arc is clockwise from north.
-
-              sweep = (
-                  end -
-                  start
-              )
-
-
-              # Avoid producing a zero-length arc.
-
-              if abs(
-                  sweep
-              ) < 0.000001:
-
-                  sweep = 360.0
-
-
-              # Keep the actual encoded direction.
-
-              steps = max(
-                  8,
-                  min(
-                      720,
-                      int(
-                          abs(
-                              sweep
-                          )
-                          /
-                          2.0
-                      )
-                  )
-              )
 
 
               result = []
 
 
-              for i in range(
-                  steps + 1
-              ):
-
-                  fraction = (
-                      i /
-                      steps
-                  )
-
-
-                  bearing = (
-                      start
-                      +
-                      (
-                          sweep
-                          *
-                          fraction
-                      )
-                  )
-
-
-                  radians = math.radians(
-                      bearing
-                  )
-
-
-                  lat0 = center[1]
-
-
-                  lon0 = center[0]
-
-
-                  # North/south component.
-
-                  delta_lat = (
-                      radius
-                      *
-                      math.cos(
-                          radians
-                      )
-                      /
-                      111320.0
-                  )
-
-
-                  latitude = (
-                      lat0
-                      +
-                      delta_lat
-                  )
-
-
-                  # East/west component.
-
-                  metres_per_degree_lon = (
-                      111320.0
-                      *
-                      max(
-                          0.01,
-                          math.cos(
-                              math.radians(
-                                  lat0
-                              )
-                          )
-                      )
-                  )
-
-
-                  delta_lon = (
-                      radius
-                      *
-                      math.sin(
-                          radians
-                      )
-                      /
-                      metres_per_degree_lon
-                  )
-
-
-                  longitude = (
-                      lon0
-                      +
-                      delta_lon
-                  )
-
-
-                  result.append(
-                      [
-                          longitude,
-                          latitude
-                      ]
-                  )
-
-
-              return result
-
-
-          # ========================================================
-          # CIRCLE
-          # ========================================================
-
-          def circle_points(
-              element
-          ):
-
-              radius = radius_metres(
-                  element
-              )
-
-
-              if radius is None:
-                  return []
-
-
-              center = None
-
-
-              for node in element.iter():
-
-                  if local(
-                      node.tag
-                  ) != "pos":
-
-                      continue
-
-
-                  points = positions(
-                      node
-                  )
-
-
-                  if points:
-
-                      center = points[0]
-
-                      break
-
-
-              if center is None:
-
-                  return []
-
-
-              points = []
-
-
-              # 360 degrees, clockwise from north.
+              # 2.5-degree spacing gives a smooth circle while
+              # keeping the resulting GeoJSON manageable.
 
               steps = 144
+
+
+              lat0 = center[1]
+              lon0 = center[0]
 
 
               for i in range(
@@ -1907,10 +1884,6 @@ jobs:
                   radians = math.radians(
                       bearing
                   )
-
-
-                  lat0 = center[1]
-                  lon0 = center[0]
 
 
                   latitude = (
@@ -1957,7 +1930,7 @@ jobs:
                   )
 
 
-                  points.append(
+                  result.append(
                       [
                           longitude,
                           latitude
@@ -1965,52 +1938,227 @@ jobs:
                   )
 
 
-              return points
+              return result
 
 
           # ========================================================
-          # CURVE SEGMENTS
+          # ARC
+          #
+          # Bearings are clockwise from true north.
           # ========================================================
 
-          def curve_segments(
-              curve,
-              seen=None
+          def make_arc(
+              element
           ):
 
-              if seen is None:
-                  seen = set()
+              center = None
 
 
-              curve = (
-                  resolve_chain(
-                      curve
-                  )[-1]
-                  if resolve_chain(
-                      curve
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "pos":
+
+                      continue
+
+
+                  pts = extract_positions(
+                      node
                   )
-                  else curve
-              )
 
 
-              marker = id(
-                  curve
-              )
+                  if pts:
+
+                      center = pts[0]
+
+                      break
 
 
-              if marker in seen:
+              if center is None:
 
                   return []
 
 
-              seen.add(
-                  marker
+              radius = radius_metres(
+                  element
+              )
+
+
+              if radius is None:
+
+                  return []
+
+
+              start = numeric(
+                  element,
+                  {
+                      "startAngle"
+                  }
+              )
+
+
+              end = numeric(
+                  element,
+                  {
+                      "endAngle"
+                  }
+              )
+
+
+              if (
+                  start is None
+                  or
+                  end is None
+              ):
+
+                  return []
+
+
+              sweep = (
+                  end
+                  -
+                  start
+              )
+
+
+              if abs(
+                  sweep
+              ) < 0.000001:
+
+                  sweep = 360.0
+
+
+              steps = max(
+                  8,
+                  min(
+                      720,
+                      int(
+                          abs(
+                              sweep
+                          )
+                          /
+                          2.0
+                      )
+                  )
               )
 
 
               result = []
 
 
-              for node in curve.iter():
+              lat0 = center[1]
+              lon0 = center[0]
+
+
+              for i in range(
+                  steps + 1
+              ):
+
+                  fraction = (
+                      i
+                      /
+                      steps
+                  )
+
+
+                  bearing = (
+                      start
+                      +
+                      (
+                          sweep
+                          *
+                          fraction
+                      )
+                  )
+
+
+                  radians = math.radians(
+                      bearing
+                  )
+
+
+                  latitude = (
+                      lat0
+                      +
+                      (
+                          radius
+                          *
+                          math.cos(
+                              radians
+                          )
+                          /
+                          111320.0
+                      )
+                  )
+
+
+                  metres_per_degree_lon = (
+                      111320.0
+                      *
+                      max(
+                          0.01,
+                          math.cos(
+                              math.radians(
+                                  lat0
+                              )
+                          )
+                      )
+                  )
+
+
+                  longitude = (
+                      lon0
+                      +
+                      (
+                          radius
+                          *
+                          math.sin(
+                              radians
+                          )
+                          /
+                          metres_per_degree_lon
+                      )
+                  )
+
+
+                  result.append(
+                      [
+                          longitude,
+                          latitude
+                      ]
+                  )
+
+
+              return result
+
+
+          # ========================================================
+          # CURVE EXTRACTION
+          # ========================================================
+
+          def curve_points(
+              curve
+          ):
+
+              resolved = resolve_reference(
+                  href_value(
+                      curve
+                  )
+              )
+
+
+              target = (
+                  resolved
+                  if resolved is not None
+                  else
+                  curve
+              )
+
+
+              # Circle.
+
+              for node in target.iter():
 
                   name = local(
                       node.tag
@@ -2018,42 +2166,53 @@ jobs:
 
 
                   if name in {
-                      "ArcByCenterPoint",
-                      "CircleByCenterPoint"
+                      "CircleByCenterPoint",
+                      "Circle"
                   }:
 
-                      if name == "CircleByCenterPoint":
-
-                          points = circle_points(
-                              node
-                          )
-
-                          if points:
-
-                              result.append(
-                                  (
-                                      "circle",
-                                      points
-                                  )
-                              )
-
-                      else:
-
-                          points = arc_by_center_points(
-                              node
-                          )
-
-                          if points:
-
-                              result.append(
-                                  (
-                                      "arc",
-                                      points
-                                  )
-                              )
+                      points = make_circle(
+                          node
+                      )
 
 
-                  elif name in {
+                      if points:
+
+                          return points
+
+
+              # Arc.
+
+              for node in target.iter():
+
+                  name = local(
+                      node.tag
+                  )
+
+
+                  if name in {
+                      "ArcByCenterPoint"
+                  }:
+
+                      points = make_arc(
+                          node
+                      )
+
+
+                      if points:
+
+                          return points
+
+
+              # Normal straight/geodesic segment.
+
+              for node in target.iter():
+
+                  name = local(
+                      node.tag
+                  )
+
+
+                  if name in {
                       "LineStringSegment",
                       "GeodesicString",
                       "Geodesic",
@@ -2061,7 +2220,7 @@ jobs:
                       "ArcStringByBulge"
                   }:
 
-                      points = positions(
+                      points = extract_positions(
                           node
                       )
 
@@ -2070,145 +2229,41 @@ jobs:
                           points
                       ) >= 2:
 
-                          result.append(
-                              (
-                                  name,
-                                  points
-                              )
-                          )
+                          return points
 
 
-              return result
+              # Last resort.
 
-
-          # ========================================================
-          # JOIN CURVE SEGMENTS
-          # ========================================================
-
-          def append_joined(
-              output,
-              segment
-          ):
-
-              if not segment:
-
-                  return
-
-
-              if not output:
-
-                  output.extend(
-                      segment
-                  )
-
-                  return
-
-
-              # Normal case: segment starts where previous segment
-              # ended.
-
-              if (
-                  output[-1]
-                  ==
-                  segment[0]
-              ):
-
-                  output.extend(
-                      segment[1:]
-                  )
-
-                  return
-
-
-              # Sometimes floating point differences leave two
-              # nearly identical points.
-
-              def close(
-                  a,
-                  b
-              ):
-
-                  return (
-                      abs(
-                          a[0] - b[0]
-                      )
-                      <
-                      1e-8
-                      and
-                      abs(
-                          a[1] - b[1]
-                      )
-                      <
-                      1e-8
-                  )
-
-
-              if close(
-                  output[-1],
-                  segment[0]
-              ):
-
-                  output.extend(
-                      segment[1:]
-                  )
-
-                  return
-
-
-              # If the encoded curve direction is reversed, reverse
-              # this segment before joining.
-
-              if close(
-                  output[-1],
-                  segment[-1]
-              ):
-
-                  reversed_segment = list(
-                      reversed(
-                          segment
-                      )
-                  )
-
-                  output.extend(
-                      reversed_segment[1:]
-                  )
-
-                  return
-
-
-              # Gap. Preserve the segment rather than silently
-              # discarding it. The diagnostic will expose this.
-
-              output.extend(
-                  segment
+              points = extract_positions(
+                  target
               )
 
 
+              if len(
+                  points
+              ) >= 2:
+
+                  return points
+
+
+              return []
+
+
           # ========================================================
-          # RING
+          # RING EXTRACTION
           # ========================================================
 
           def ring_points(
               ring
           ):
 
-              resolved = resolve_chain(
+              # ----------------------------------------------------
+              # First: direct coordinate ring.
+              # This is the known-good/simple path.
+              # ----------------------------------------------------
+
+              direct = extract_positions(
                   ring
-              )
-
-
-              if not resolved:
-
-                  return []
-
-
-              target = resolved[-1]
-
-
-              # First try a conventional LinearRing coordinate list.
-
-              direct = positions(
-                  target
               )
 
 
@@ -2230,15 +2285,14 @@ jobs:
                   return direct
 
 
-              # AIXM commonly uses curveMember.
-
-              joined = []
-
+              # ----------------------------------------------------
+              # Second: curve members.
+              # ----------------------------------------------------
 
               curve_members = []
 
 
-              for node in target.iter():
+              for node in ring.iter():
 
                   if local(
                       node.tag
@@ -2247,59 +2301,133 @@ jobs:
                       continue
 
 
-                  target_curve = href_target(
+                  target = reference_target(
                       node
                   )
 
 
-                  if target_curve is None:
-
-                      # It may be an inline Curve.
-
-                      for child in node:
-
-                          if local(
-                              child.tag
-                          ) in {
-                              "Curve",
-                              "GeodesicString",
-                              "LineStringSegment"
-                          }:
-
-                              target_curve = child
-
-                              break
-
-
-                  if target_curve is not None:
+                  if target is not None:
 
                       curve_members.append(
-                          target_curve
+                          target
                       )
+
+                      continue
+
+
+                  # Inline curve.
+
+                  for child in node:
+
+                      if local(
+                          child.tag
+                      ) in {
+                          "Curve",
+                          "LineStringSegment",
+                          "GeodesicString",
+                          "Geodesic",
+                          "ArcString",
+                          "ArcStringByBulge"
+                      }:
+
+                          curve_members.append(
+                              child
+                          )
+
+
+              joined = []
+
+
+              def same_point(
+                  a,
+                  b
+              ):
+
+                  return (
+                      abs(
+                          a[0] - b[0]
+                      )
+                      <
+                      1e-8
+                      and
+                      abs(
+                          a[1] - b[1]
+                      )
+                      <
+                      1e-8
+                  )
+
+
+              def append_segment(
+                  segment
+              ):
+
+                  if not segment:
+
+                      return
+
+
+                  if not joined:
+
+                      joined.extend(
+                          segment
+                      )
+
+                      return
+
+
+                  if same_point(
+                      joined[-1],
+                      segment[0]
+                  ):
+
+                      joined.extend(
+                          segment[1:]
+                      )
+
+                      return
+
+
+                  if same_point(
+                      joined[-1],
+                      segment[-1]
+                  ):
+
+                      reversed_segment = list(
+                          reversed(
+                              segment
+                          )
+                      )
+
+                      joined.extend(
+                          reversed_segment[1:]
+                      )
+
+                      return
+
+
+                  # A gap exists. Do not discard the segment.
+
+                  joined.extend(
+                      segment
+                  )
 
 
               for curve in curve_members:
 
-                  segments = curve_segments(
-                      curve
-                  )
-
-
-                  for segment_type, segment in segments:
-
-                      append_joined(
-                          joined,
-                          segment
+                  append_segment(
+                      curve_points(
+                          curve
                       )
+                  )
 
 
               if len(
                   joined
               ) >= 3:
 
-                  if (
-                      joined[0]
-                      !=
+                  if not same_point(
+                      joined[0],
                       joined[-1]
                   ):
 
@@ -2315,215 +2443,281 @@ jobs:
 
 
           # ========================================================
-          # SURFACES
+          # PATCH EXTRACTION
           # ========================================================
 
-          def collect_surface_objects(
-              airspace
+          def polygon_patches_from_object(
+              object_node
           ):
 
-              result = []
-
-              seen = set()
-
-              queue = [
-                  airspace
-              ]
+              patches = []
 
 
-              # Follow every reference under the airspace. This
-              # catches horizontalProjection references, shared
-              # surfaces, rings and curves.
+              for node in object_node.iter():
 
-              while queue:
+                  if local(
+                      node.tag
+                  ) == "PolygonPatch":
 
-                  current = queue.pop()
+                      patches.append(
+                          node
+                      )
 
 
-                  if current is None:
+              return patches
+
+
+          def polygon_from_patch(
+              patch
+          ):
+
+              outer = None
+              holes = []
+
+
+              # Exterior.
+
+              for node in patch.iter():
+
+                  if local(
+                      node.tag
+                  ) != "exterior":
 
                       continue
 
 
-                  marker = id(
-                      current
-                  )
+                  for child in node.iter():
+
+                      if local(
+                          child.tag
+                      ) in {
+                          "LinearRing",
+                          "Ring"
+                      }:
+
+                          outer = child
+
+                          break
 
 
-                  if marker in seen:
+                  if outer is not None:
+
+                      break
+
+
+              if outer is None:
+
+                  return None
+
+
+              outer_points = ring_points(
+                  outer
+              )
+
+
+              if len(
+                  outer_points
+              ) < 4:
+
+                  return None
+
+
+              # Interiors.
+
+              for node in patch.iter():
+
+                  if local(
+                      node.tag
+                  ) != "interior":
 
                       continue
 
 
-                  seen.add(
-                      marker
-                  )
+                  for child in node.iter():
 
+                      if local(
+                          child.tag
+                      ) in {
+                          "LinearRing",
+                          "Ring"
+                      }:
 
-                  name = local(
-                      current.tag
-                  )
-
-
-                  if name in {
-                      "Surface",
-                      "CompositeSurface"
-                  }:
-
-                      result.append(
-                          current
-                      )
-
-
-                  # Follow direct xlinks.
-
-                  target = href_target(
-                      current
-                  )
-
-
-                  if target is not None:
-
-                      queue.append(
-                          target
-                      )
-
-
-                  # Follow references contained by this object.
-
-                  for child in current.iter():
-
-                      target = href_target(
-                          child
-                      )
-
-
-                      if target is not None:
-
-                          queue.append(
-                              target
+                          points = ring_points(
+                              child
                           )
 
 
-              return result
+                          if len(
+                              points
+                          ) >= 4:
+
+                              holes.append(
+                                  points
+                              )
+
+
+                          break
+
+
+              return [
+                  outer_points
+              ] + holes
 
 
           # ========================================================
-          # POLYGON PATCHES
+          # AIRSPACE GEOMETRY
           # ========================================================
 
-          def polygons_for_airspace(
+          def geometry_for_airspace(
               airspace
           ):
 
-              polygons = []
-
-
-              surfaces = collect_surface_objects(
+              reachable = reachable_objects(
                   airspace
               )
 
 
-              for surface in surfaces:
+              # ----------------------------------------------------
+              # Primary path:
+              # Find any PolygonPatch reachable from the Airspace.
+              # ----------------------------------------------------
 
-                  for patch in surface.iter():
+              patches = []
 
-                      if local(
-                          patch.tag
-                      ) != "PolygonPatch":
+
+              seen_patch = set()
+
+
+              for object_node in reachable:
+
+                  for patch in polygon_patches_from_object(
+                      object_node
+                  ):
+
+                      marker = id(
+                          patch
+                      )
+
+
+                      if marker in seen_patch:
 
                           continue
 
 
-                      exterior = None
-                      interiors = []
+                      seen_patch.add(
+                          marker
+                      )
 
 
-                      # Only examine direct boundary structures
-                      # beneath this patch.
+                      patches.append(
+                          patch
+                      )
 
-                      for node in patch:
 
-                          name = local(
-                              node.tag
+              polygons = []
+
+
+              for patch in patches:
+
+                  polygon = polygon_from_patch(
+                      patch
+                  )
+
+
+                  if polygon is not None:
+
+                      polygons.append(
+                          polygon
+                      )
+
+
+              if polygons:
+
+                  if len(
+                      polygons
+                  ) == 1:
+
+                      return {
+                          "type":
+                              "Polygon",
+                          "coordinates":
+                              polygons[0]
+                      }
+
+
+                  return {
+                      "type":
+                          "MultiPolygon",
+                      "coordinates":
+                          polygons
+                  }
+
+
+              # ----------------------------------------------------
+              # FALLBACK:
+              #
+              # Look specifically for Surface/CompositeSurface
+              # objects and inspect their patches.
+              # ----------------------------------------------------
+
+              for object_node in reachable:
+
+                  if local(
+                      object_node.tag
+                  ) not in {
+                      "Surface",
+                      "CompositeSurface"
+                  }:
+
+                      continue
+
+
+                  patches = polygon_patches_from_object(
+                      object_node
+                  )
+
+
+                  for patch in patches:
+
+                      polygon = polygon_from_patch(
+                          patch
+                      )
+
+
+                      if polygon is not None:
+
+                          polygons.append(
+                              polygon
                           )
 
 
-                          if name == "exterior":
+              if polygons:
 
-                              for child in node.iter():
+                  if len(
+                      polygons
+                  ) == 1:
 
-                                  if local(
-                                      child.tag
-                                  ) in {
-                                      "LinearRing",
-                                      "Ring"
-                                  }:
-
-                                      exterior = child
-
-                                      break
+                      return {
+                          "type":
+                              "Polygon",
+                          "coordinates":
+                              polygons[0]
+                      }
 
 
-                          elif name == "interior":
-
-                              for child in node.iter():
-
-                                  if local(
-                                      child.tag
-                                  ) in {
-                                      "LinearRing",
-                                      "Ring"
-                                  }:
-
-                                      points = ring_points(
-                                          child
-                                      )
+                  return {
+                      "type":
+                          "MultiPolygon",
+                      "coordinates":
+                          polygons
+                  }
 
 
-                                      if len(
-                                          points
-                                      ) >= 4:
-
-                                          interiors.append(
-                                              points
-                                          )
-
-
-                                      break
-
-
-                      if exterior is None:
-
-                          continue
-
-
-                      outer = ring_points(
-                          exterior
-                      )
-
-
-                      if len(
-                          outer
-                      ) < 4:
-
-                          continue
-
-
-                      polygons.append(
-                          [
-                              outer
-                          ]
-                          +
-                          interiors
-                      )
-
-
-              return polygons
+              return None
 
 
           # ========================================================
-          # AIRSPACE METADATA
+          # METADATA
           # ========================================================
 
           def first_value(
@@ -2560,7 +2754,7 @@ jobs:
 
 
           # ========================================================
-          # FIND EVERY AIRSPACE
+          # FIND ALL AIRSPACE
           # ========================================================
 
           airspaces = [
@@ -2568,9 +2762,7 @@ jobs:
               for element in root.iter()
               if local(
                   element.tag
-              )
-              ==
-              "Airspace"
+              ) == "Airspace"
           ]
 
 
@@ -2580,7 +2772,7 @@ jobs:
           )
 
           print(
-              "NATS AIRSPACE GEOMETRY RECONSTRUCTION"
+              "NATS AIRSPACE IMPORT"
           )
 
           print(
@@ -2615,21 +2807,17 @@ jobs:
 
 
           type_counts = Counter()
-          type_geometry_success = Counter()
-          type_geometry_failure = Counter()
+          type_success = Counter()
+          type_failure = Counter()
 
 
-          local_type_counts = Counter()
-          local_type_geometry_failure = Counter()
-
-
-          curve_statistics = Counter()
-          ring_failures = 0
-          surface_failures = 0
+          local_counts = Counter()
+          local_success = Counter()
+          local_failure = Counter()
 
 
           # ========================================================
-          # PROCESS EVERY AIRSPACE
+          # PROCESS EVERYTHING
           # ========================================================
 
           for index, airspace in enumerate(
@@ -2699,85 +2887,39 @@ jobs:
               ] += 1
 
 
-              local_type_counts[
+              local_counts[
                   local_key
               ] += 1
 
 
-              polygons = polygons_for_airspace(
+              geometry = geometry_for_airspace(
                   airspace
               )
 
 
-              if not polygons:
+              if geometry is not None:
 
-                  geometry_missing += 1
+                  geometry_success += 1
 
-                  type_geometry_failure[
+                  type_success[
                       type_key
                   ] += 1
 
-                  local_type_geometry_failure[
+                  local_success[
                       local_key
                   ] += 1
 
               else:
 
-                  geometry_success += 1
+                  geometry_missing += 1
 
-                  type_geometry_success[
+                  type_failure[
                       type_key
                   ] += 1
 
-
-                  for polygon in polygons:
-
-                      if len(
-                          polygon
-                      ) >= 1:
-
-                          curve_statistics[
-                              "polygon"
-                          ] += 1
-
-
-                          if len(
-                              polygon[0]
-                          ) >= 4:
-
-                              curve_statistics[
-                                  "outer_ring"
-                              ] += 1
-
-                          else:
-
-                              ring_failures += 1
-
-
-              geometry = None
-
-
-              if polygons:
-
-                  if len(
-                      polygons
-                  ) == 1:
-
-                      geometry = {
-                          "type":
-                              "Polygon",
-                          "coordinates":
-                              polygons[0]
-                      }
-
-                  else:
-
-                      geometry = {
-                          "type":
-                              "MultiPolygon",
-                          "coordinates":
-                              polygons
-                      }
+                  local_failure[
+                      local_key
+                  ] += 1
 
 
               identifier = (
@@ -2796,8 +2938,6 @@ jobs:
 
 
               properties = {
-
-                  # Raw NATS/AIXM metadata.
 
                   "source":
                       "NATS UK ICAO AIP Dataset",
@@ -2853,8 +2993,9 @@ jobs:
               )
 
 
-              # Useful live diagnostics for ATZ/MATZ and any
-              # suspiciously named feature.
+              # ----------------------------------------------------
+              # ATZ / MATZ diagnostics
+              # ----------------------------------------------------
 
               combined = (
                   f"{airspace_type} "
@@ -2872,11 +3013,11 @@ jobs:
 
                   print("")
                   print(
-                      "SPECIAL DIAGNOSTIC:"
+                      "SPECIAL AIRSPACE:"
                   )
 
                   print(
-                      "Airspace:",
+                      "Index:",
                       index
                   )
 
@@ -2904,16 +3045,9 @@ jobs:
                       "Geometry:",
                       (
                           "YES"
-                          if geometry
+                          if geometry is not None
                           else
                           "NO"
-                      )
-                  )
-
-                  print(
-                      "Polygons:",
-                      len(
-                          polygons
                       )
                   )
 
@@ -2947,7 +3081,7 @@ jobs:
 
 
           # ========================================================
-          # DIAGNOSTICS
+          # SUMMARY
           # ========================================================
 
           print("")
@@ -2956,7 +3090,7 @@ jobs:
           )
 
           print(
-              "GEOMETRY SUMMARY"
+              "NATS AIRSPACE GEOMETRY SUMMARY"
           )
 
           print(
@@ -2980,11 +3114,6 @@ jobs:
               geometry_missing
           )
 
-          print(
-              "Ring failures:",
-              ring_failures
-          )
-
 
           print("")
           print(
@@ -2998,20 +3127,11 @@ jobs:
 
           for key, count in type_counts.most_common():
 
-              success = type_geometry_success[
-                  key
-              ]
-
-              failure = type_geometry_failure[
-                  key
-              ]
-
-
               print(
                   f"{key:30s} "
                   f"total={count:5d} "
-                  f"geometry={success:5d} "
-                  f"failed={failure:5d}"
+                  f"geometry={type_success[key]:5d} "
+                  f"failed={type_failure[key]:5d}"
               )
 
 
@@ -3025,52 +3145,37 @@ jobs:
           )
 
 
-          for key, count in local_type_counts.most_common():
-
-              failure = local_type_geometry_failure[
-                  key
-              ]
-
+          for key, count in local_counts.most_common():
 
               print(
                   f"{key:40s} "
                   f"total={count:5d} "
-                  f"geometry_failed={failure:5d}"
+                  f"geometry={local_success[key]:5d} "
+                  f"failed={local_failure[key]:5d}"
               )
 
 
           print("")
           print(
-              "OUTPUT:"
-          )
-
-          print(
+              "GeoJSON:",
               OUTPUT_FILE
           )
 
 
           print("")
           print(
-              "IMPORTANT:"
+              "NO AIRSPACE CLASSIFICATION FILTERING WAS USED."
           )
 
           print(
-              "No airspace classification filtering was performed."
-          )
-
-          print(
-              "Every NATS Airspace feature has been written."
-          )
-
-          print(
-              "Features without geometry remain in GeoJSON as geometry:null."
+              "ALL NATS AIRSPACE FEATURES WERE RETAINED."
           )
 
           PY
 
 
       # ============================================================
-      # VRP CONVERSION
+      # REPORTING POINTS
       # ============================================================
 
       - name: Convert NATS reporting points
@@ -3128,7 +3233,7 @@ jobs:
           if not rows:
 
               raise SystemExit(
-                  "ERROR: No VRP records."
+                  "ERROR: NATS VRP CSV contains no records."
               )
 
 
@@ -3213,7 +3318,7 @@ jobs:
           ):
 
               raise SystemExit(
-                  "ERROR: VRP coordinate fields not found."
+                  "ERROR: Could not identify NATS VRP coordinate fields."
               )
 
 
@@ -3223,6 +3328,7 @@ jobs:
           ):
 
               if value is None:
+
                   return None
 
 
@@ -3232,6 +3338,7 @@ jobs:
 
 
               if not text:
+
                   return None
 
 
@@ -3252,6 +3359,7 @@ jobs:
                           1
                       ).upper()
                   )
+
 
                   text = (
                       text[
@@ -3296,6 +3404,7 @@ jobs:
 
 
                       return number
+
 
               except ValueError:
 
@@ -3371,6 +3480,7 @@ jobs:
 
                           return number
 
+
                   except ValueError:
 
                       pass
@@ -3391,6 +3501,9 @@ jobs:
 
 
           features = []
+
+
+          invalid = 0
 
 
           for row in rows:
@@ -3416,6 +3529,8 @@ jobs:
                   or
                   lon is None
               ):
+
+                  invalid += 1
 
                   continue
 
@@ -3473,7 +3588,7 @@ jobs:
           if not features:
 
               raise SystemExit(
-                  "ERROR: No valid VRPs."
+                  "ERROR: Zero valid NATS reporting points."
               )
 
 
@@ -3496,11 +3611,21 @@ jobs:
           )
 
 
+          print("")
           print(
-              "NATS VRPs:",
+              "NATS reporting points:",
               len(features)
           )
 
+          print(
+              "Invalid rows:",
+              invalid
+          )
+
+          print(
+              "Output:",
+              output
+          )
 
           PY
 
@@ -3509,9 +3634,10 @@ jobs:
       # VALIDATE
       # ============================================================
 
-      - name: Validate generated data
+      - name: Validate generated aviation data
         run: |
           set -euo pipefail
+
 
           AIRSPACE="/tmp/avimap-data/uk-airspace.geojson"
 
@@ -3554,13 +3680,13 @@ jobs:
           echo ""
           echo "=========================================="
 
-          echo "FINAL DATA VALIDATION"
+          echo "FINAL VALIDATION"
 
           echo "=========================================="
 
           echo ""
 
-          echo "Airspace:"
+          echo "NATS Airspace features:"
           echo "${AIRSPACE_COUNT}"
 
           echo ""
@@ -3575,7 +3701,7 @@ jobs:
 
           echo ""
 
-          echo "Reporting points:"
+          echo "NATS reporting points:"
           echo "${VRP_COUNT}"
 
           echo ""
@@ -3583,7 +3709,21 @@ jobs:
 
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
 
-            echo "ERROR: No airspace."
+            echo "ERROR: No NATS Airspace features."
+
+            exit 1
+
+          fi
+
+
+          if [ "${GEOMETRY_COUNT}" -eq 0 ]; then
+
+            echo ""
+            echo "ERROR: ZERO AIRSPACE GEOMETRIES GENERATED."
+            echo ""
+            echo "The workflow will NOT overwrite the existing"
+            echo "working airspace dataset with an empty geometry set."
+            echo ""
 
             exit 1
 
@@ -3592,7 +3732,7 @@ jobs:
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
 
-            echo "ERROR: No reporting points."
+            echo "ERROR: No NATS reporting points."
 
             exit 1
 
@@ -3604,9 +3744,14 @@ jobs:
 
       # ============================================================
       # INSTALL
+      #
+      # IMPORTANT:
+      #
+      # We only reach this point if at least one airspace geometry
+      # was successfully generated.
       # ============================================================
 
-      - name: Install aviation data
+      - name: Install NATS aviation data
         run: |
           set -euo pipefail
 
@@ -3623,6 +3768,11 @@ jobs:
             data/uk-reporting-points.geojson
 
 
+          echo ""
+          echo "Installed aviation data:"
+          echo ""
+
+
           ls -lh \
             data/uk-airspace.geojson \
             data/uk-reporting-points.geojson
@@ -3632,13 +3782,15 @@ jobs:
       # COMMIT
       # ============================================================
 
-      - name: Commit aviation data
+      - name: Commit NATS aviation data
         run: |
           set -euo pipefail
+
 
           git config \
             user.name \
             "AviMap Data Bot"
+
 
           git config \
             user.email \
@@ -3652,12 +3804,16 @@ jobs:
 
           if git diff --cached --quiet; then
 
-            echo "No aviation data changes."
+            echo ""
+            echo "No aviation data changes detected."
 
             exit 0
 
           fi
 
+
+          echo ""
+          echo "Files being committed:"
 
           git diff \
             --cached \
@@ -3665,7 +3821,7 @@ jobs:
 
 
           git commit \
-            -m "Improve NATS AIXM airspace geometry"
+            -m "Improve NATS AIXM geometry import"
 
 
           git push
