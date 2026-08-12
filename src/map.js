@@ -258,29 +258,28 @@ function addAirspace() {
     data: sourceData
   });
 
-  const colorExpression = [
-    "match", ["get", "avimapColor"],
-    "red", "#c62828",
-    "purple", "#8b2c83",
-    "blue", "#1769aa",
-    "grey", "#66706f",
-    "#66706f"
-  ];
-
+  /*
+   * NATS airspace is currently displayed as a neutral map overlay.
+   *
+   * There is deliberately NO styling based on NATS airspace
+   * classification, category, type, class, or local type.
+   *
+   * This keeps the raw NATS geometry visible while we establish
+   * the complete dataset. AviMap-specific colour coding can be
+   * reintroduced later as a separate presentation layer.
+   */
   map.addLayer({
     id: "avimap-airspace-fill",
     type: "fill",
     source: "avimap-airspace-source",
+    filter: [
+      "!=",
+      ["geometry-type"],
+      "Point"
+    ],
     paint: {
-      "fill-color": colorExpression,
-      "fill-opacity": [
-        "match", ["get", "avimapColor"],
-        "red", 0.08,
-        "purple", 0.08,
-        "blue", 0.07,
-        "grey", 0.035,
-        0.04
-      ]
+      "fill-color": "#ffffff",
+      "fill-opacity": 0.02
     }
   });
 
@@ -288,23 +287,15 @@ function addAirspace() {
     id: "avimap-airspace-line",
     type: "line",
     source: "avimap-airspace-source",
+    filter: [
+      "!=",
+      ["geometry-type"],
+      "Point"
+    ],
     paint: {
-      "line-color": colorExpression,
-      "line-width": [
-        "match", ["get", "avimapColor"],
-        "red", 2.0,
-        "purple", 1.9,
-        "blue", 1.7,
-        "grey", 1.1,
-        1.2
-      ],
-      "line-opacity": 0.95,
-      "line-dasharray": [
-        "case",
-        ["get", "avimapDashed"],
-        ["literal", [2.5, 2.5]],
-        ["literal", [1, 0]]
-      ]
+      "line-color": "#66706f",
+      "line-width": 1,
+      "line-opacity": 0.65
     }
   });
 
@@ -314,128 +305,21 @@ function addAirspace() {
     source: "avimap-airspace-source",
     minzoom: 7,
     layout: {
-      "text-field": ["coalesce", ["get", "name"], ["get", "designator"], ""],
+      "text-field": [
+        "coalesce",
+        ["get", "name"],
+        ["get", "designator"],
+        ""
+      ],
       "text-size": 9,
       "text-max-width": 10
     },
     paint: {
-      "text-color": colorExpression,
+      "text-color": "#66706f",
       "text-halo-color": "#fff",
       "text-halo-width": 1
     }
   });
-}
-
-function classifyAirspaceStyle(properties = {}) {
-  /*
-   * Canonical AviMap airspace categories:
-   *   A-G   -> existing class colours
-   *   PA    -> Prohibited (red)
-   *   RA    -> Restricted (red)
-   *   DA    -> Danger (red)
-   *   ATZ   -> ATZ colour / dashed
-   *   MATZ  -> blue / dashed
-   *   RMZ   -> blue / dashed
-   *   TMZ   -> ATZ colour / dashed
-   *
-   * category is authoritative when present. The fallbacks are deliberately
-   * defensive so older/generated NATS GeoJSON still renders correctly.
-   */
-
-  const category = String(properties.category || "").trim().toUpperCase();
-
-  const classifyText = [
-    properties.category,
-    properties.aixmType,
-    properties.airspaceType,
-    properties.type,
-    properties.localType,
-    properties.icaoClass,
-    properties.classification,
-    properties.name,
-    properties.designator
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ");
-
-  // Canonical categories first.
-  if (category === "PA" || category === "RA" || category === "DA") {
-    return { color: "red", dash: false, category };
-  }
-
-  if (category === "ATZ" || category === "TMZ") {
-    return { color: "purple", dash: true, category };
-  }
-
-  if (category === "MATZ" || category === "RMZ") {
-    return { color: "blue", dash: true, category };
-  }
-
-  if (["A", "B", "C", "D", "E", "F", "G"].includes(category)) {
-    if (category === "A") return { color: "purple", dash: false, category };
-    if (["B", "C", "D", "E"].includes(category)) {
-      return { color: "blue", dash: false, category };
-    }
-    return { color: "grey", dash: false, category };
-  }
-
-  // Defensive fallback for NATS/AIXM variants.
-  if (/\b(MILITARY\s+AERODROME\s+TRAFFIC\s+ZONE|MILITARY\s+ATZ|MATZ)\b/.test(classifyText)) {
-    return { color: "blue", dash: true, category: "MATZ" };
-  }
-
-  if (/\b(RADIO\s+(COMMUNICATION\s+)?MANDATORY\s+ZONE|RMZ)\b/.test(classifyText)) {
-    return { color: "blue", dash: true, category: "RMZ" };
-  }
-
-  if (/\b(TRANSPONDER\s+MANDATORY\s+ZONE|TMZ)\b/.test(classifyText)) {
-    return { color: "purple", dash: true, category: "TMZ" };
-  }
-
-  if (/\b(AERODROME\s+TRAFFIC\s+ZONE|ATZ)\b/.test(classifyText)) {
-    return { color: "purple", dash: true, category: "ATZ" };
-  }
-
-  if (/\b(PROHIBITED|PROHIBITED\s+AREA|PA)\b/.test(classifyText)) {
-    return { color: "red", dash: false, category: "PA" };
-  }
-
-  if (/\b(RESTRICTED|RESTRICTED\s+AREA|RA)\b/.test(classifyText)) {
-    return { color: "red", dash: false, category: "RA" };
-  }
-
-  if (/\b(DANGER|DANGER\s+AREA|DA)\b/.test(classifyText)) {
-    return { color: "red", dash: false, category: "DA" };
-  }
-
-  // Never infer Class D from a generic "D" buried in text. Only accept
-  // explicit class fields for A-G.
-  const explicitClass = String(
-    properties.icaoClass ??
-    properties.classification ??
-    properties.class ??
-    ""
-  ).trim().toUpperCase().replace(/^CLASS\s+/, "");
-
-  if (["A", "B", "C", "D", "E", "F", "G"].includes(explicitClass)) {
-    if (explicitClass === "A") {
-      return { color: "purple", dash: false, category: "A" };
-    }
-
-    if (["B", "C", "D", "E"].includes(explicitClass)) {
-      return { color: "blue", dash: false, category: explicitClass };
-    }
-
-    return { color: "grey", dash: false, category: explicitClass };
-  }
-
-  return {
-    color: "grey",
-    dash: false,
-    category: category || "Other"
-  };
 }
 
 function normaliseGeoJson(input) {
@@ -454,40 +338,34 @@ function normaliseGeoJson(input) {
     return { type: "FeatureCollection", features: [] };
   }
 
+  /*
+   * Preserve the NATS GeoJSON as supplied.
+   *
+   * No NATS airspace classification is converted into an
+   * AviMap colour/category here. The PWA receives the source
+   * properties unchanged apart from a safe display name.
+   */
   return {
     type: "FeatureCollection",
-    features: (input.features || []).filter(Boolean).map((feature, index) => {
-      const properties = {
-        ...(feature.properties || {})
-      };
+    features: (input.features || [])
+      .filter(Boolean)
+      .map((feature, index) => {
+        const properties = {
+          ...(feature.properties || {})
+        };
 
-      const style = classifyAirspaceStyle(properties);
-
-      return {
-        ...feature,
-        properties: {
-          ...properties,
-          name:
-            properties.name ||
-            properties.designator ||
-            properties.identifier ||
-            `AREA ${index + 1}`,
-
-          // Preserve source fields for inspection.
-          type: properties.type ?? null,
-          icaoClass:
-            properties.icaoClass ??
-            properties.icaoclass ??
-            properties.class ??
-            null,
-
-          // Explicit AviMap rendering fields.
-          avimapColor: style.color,
-          avimapDashed: style.dash,
-          avimapCategory: style.category
-        }
-      };
-    })
+        return {
+          ...feature,
+          properties: {
+            ...properties,
+            name:
+              properties.name ||
+              properties.designator ||
+              properties.identifier ||
+              `AREA ${index + 1}`
+          }
+        };
+      })
   };
 }
 

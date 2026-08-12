@@ -1,6 +1,6 @@
 {
-  "version": "1.3.2",
+  "version": "1.3.3",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed NATS airspace category detection and PWA styling for A-G, PA, RA, DA, ATZ, MATZ, RMZ and TMZ."
+  "releaseNotes": "Removed NATS airspace category-based polygon styling; NATS airspace is now rendered as a neutral geometry overlay."
 }

@@ -8,7 +8,6 @@
   --teal:#167d73;
   --teal-dark:#0d5c55;
   --magenta:#d400a5;
-  --airspace:#1f6f68;
   --danger:#c43a3a;
   --warning:#c68a24;
 }
@@ -53,7 +52,6 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:80;padding:10px 14px;background:#17302d;color:#fff;border-radius:8px;box-shadow:0 7px 25px rgba(0,0,0,.2);font-size:11px;font-weight:700;max-width:calc(100% - 30px);text-align:center}
 .toast.hidden{display:none}
 .hidden{display:none!important}
-.airspace-label{font-size:9px}
 @media(max-width:600px){
   #app{grid-template-rows:54px 1fr}.topbar{height:54px}
   .top-left-card{left:9px;top:9px;min-width:0;padding:10px 11px}.map-controls{right:9px;top:9px}
@@ -69,61 +67,6 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 }
 
 
-.airspace-legend {
-  position: absolute;
-  left: 12px;
-  bottom: 92px;
-  z-index: 3;
-  min-width: 164px;
-  padding: 9px 10px;
-  border: 1px solid rgba(38, 54, 52, .18);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .92);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .10);
-  font-size: 11px;
-  line-height: 1.35;
-  color: #243b38;
-  pointer-events: none;
-}
-
-.airspace-legend > div:not(.legend-title) {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 4px;
-}
-
-.legend-title {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  color: #52625f;
-}
-
-.legend-swatch {
-  display: inline-block;
-  width: 18px;
-  height: 3px;
-  flex: 0 0 18px;
-  border-radius: 2px;
-}
-
-.legend-red { background: #c62828; }
-.legend-blue { background: #1769aa; }
-.legend-magenta { background: #b0188a; }
-.legend-purple { background: #8b2c83; }
-
-@media (max-width: 600px) {
-  .airspace-legend {
-    left: 8px;
-    bottom: 78px;
-    min-width: 150px;
-    padding: 8px 9px;
-    font-size: 10px;
-  }
-}
-
-.legend-grey { background: #66706f; }
 
 .connection-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
 .connection-target{font-size:8px;color:#7b8885;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
