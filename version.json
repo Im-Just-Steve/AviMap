@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Added a solid teal aircraft trail showing the path flown. The trail follows live aircraft telemetry and is bounded to prevent unlimited memory growth during long sessions."
+  "releaseNotes": "Added UK VRP/reporting-point data. GitHub Actions now downloads the OpenAIP UK reporting-point export, the PWA loads it locally, and VRPs are displayed and selectable on the map."
 }

@@ -29,6 +29,20 @@ export async function loadAviationData(onProgress = () => {}) {
     onProgress("UK airspace data unavailable — map remains available.");
   }
 
+  onProgress("Loading UK VRPs / reporting points…");
+  try {
+    const response = await fetchWithTimeout(DATA_URLS.reportingPoints, 20000);
+    assertOk(response);
+    result.reportingPoints = normaliseGeoJson(await response.json());
+    if (!result.reportingPoints.features.length) {
+      throw new Error("Local UK reporting-point file contains zero features");
+    }
+    onProgress(`Loaded ${result.reportingPoints.features.length.toLocaleString()} UK VRPs`);
+  } catch (error) {
+    console.error("AviMap reporting-point data failed:", error);
+    onProgress("UK VRP data unavailable — map remains available.");
+  }
+
   return result;
 }
 

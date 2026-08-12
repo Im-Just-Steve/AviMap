@@ -10,3 +10,8 @@ bucket.
 
 Do not treat this development dataset as authoritative operational UK AIP/AIS
 data.
+
+
+`uk-reporting-points.geojson` is populated by the same GitHub Actions workflow
+from the OpenAIP UK `rpp` export. The PWA reads the committed local file so
+GitHub Pages does not need to call the OpenAIP storage bucket directly.

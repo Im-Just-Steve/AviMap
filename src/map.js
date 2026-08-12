@@ -123,19 +123,27 @@ function addAirports() {
 }
 
 function addReportingPoints() {
-  const sourceData = normaliseGeoJson(dataState.reportingPoints || { type: "FeatureCollection", features: [] });
+  const sourceData = normaliseReportingPoints(
+    dataState.reportingPoints || { type: "FeatureCollection", features: [] }
+  );
+
   map.addSource("avimap-vrp-source", { type: "geojson", data: sourceData });
 
+  // UK VFR-style reporting point marker: a small magenta diamond.
   map.addLayer({
     id: "avimap-vrps",
-    type: "circle",
+    type: "symbol",
     source: "avimap-vrp-source",
-    minzoom: 7,
+    minzoom: 6,
+    layout: {
+      "icon-image": "circle-11",
+      "icon-size": 0.72,
+      "icon-allow-overlap": true
+    },
     paint: {
-      "circle-radius": 4,
-      "circle-color": "#fff",
-      "circle-stroke-color": "#7b3f8f",
-      "circle-stroke-width": 1.5
+      "icon-color": "#d400a5",
+      "icon-halo-color": "#ffffff",
+      "icon-halo-width": 1.2
     }
   });
 
@@ -143,19 +151,78 @@ function addReportingPoints() {
     id: "avimap-vrp-labels",
     type: "symbol",
     source: "avimap-vrp-source",
-    minzoom: 8,
+    minzoom: 7,
     layout: {
-      "text-field": ["get", "name"],
-      "text-size": 9,
-      "text-offset": [0, 1],
-      "text-anchor": "top"
+      "text-field": [
+        "coalesce",
+        ["get", "ident"],
+        ["get", "name"],
+        ["get", "designator"],
+        "VRP"
+      ],
+      "text-size": 10,
+      "text-offset": [0, 1.15],
+      "text-anchor": "top",
+      "text-allow-overlap": false
     },
     paint: {
       "text-color": "#6c397e",
       "text-halo-color": "#fff",
-      "text-halo-width": 1
+      "text-halo-width": 1.2
     }
   });
+}
+
+function normaliseReportingPoints(input) {
+  const fc = normaliseGeoJson(input);
+
+  return {
+    type: "FeatureCollection",
+    features: fc.features
+      .map((feature, index) => {
+        const properties = feature.properties || {};
+        const geometry = feature.geometry;
+
+        if (!geometry) return null;
+
+        let coordinates = geometry.coordinates;
+
+        // Some exports can contain a Point as expected; retain only point
+        // features for the VRP layer so the map cannot silently discard them.
+        if (geometry.type !== "Point" || !Array.isArray(coordinates) || coordinates.length < 2) {
+          return null;
+        }
+
+        const lon = Number(coordinates[0]);
+        const lat = Number(coordinates[1]);
+
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+
+        return {
+          ...feature,
+          properties: {
+            ...properties,
+            ident:
+              properties.ident ||
+              properties.designator ||
+              properties.code ||
+              properties.name ||
+              `VRP ${index + 1}`,
+            name:
+              properties.name ||
+              properties.designator ||
+              properties.ident ||
+              properties.code ||
+              `VRP ${index + 1}`
+          },
+          geometry: {
+            type: "Point",
+            coordinates: [lon, lat]
+          }
+        };
+      })
+      .filter(Boolean)
+  };
 }
 
 function addAirspace() {
@@ -417,7 +484,7 @@ export function updateAviationData(data) {
   }
 
   const vrpSource = map.getSource("avimap-vrp-source");
-  if (vrpSource) vrpSource.setData(normaliseGeoJson(data.reportingPoints));
+  if (vrpSource) vrpSource.setData(normaliseReportingPoints(data.reportingPoints));
 
   const airspaceSource = map.getSource("avimap-airspace-source");
   if (airspaceSource) airspaceSource.setData(normaliseGeoJson(data.airspace));

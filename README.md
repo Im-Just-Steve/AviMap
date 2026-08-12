@@ -335,3 +335,11 @@ yellow aircraft silhouette is now the only aircraft marker asset:
 AviMap now draws a solid teal trail behind the aircraft using live telemetry.
 The trail uses the AviMap teal (`#2A9D8F`), has rounded joins/caps, and is
 bounded to 50,000 points to avoid unbounded memory use during long sessions.
+
+
+## v1.2.0 UK VRPs
+
+UK visual reporting points / reporting points are now downloaded by the
+GitHub Actions aviation-data workflow from OpenAIP and committed as
+`data/uk-reporting-points.geojson`. The PWA loads the local file and displays
+VRPs from zoom level 6, with selectable labels.
