@@ -140,3 +140,17 @@ If both sources load but AviMap still reports zero airspaces, the next useful
 step is to inspect the browser console/network response rather than changing
 the map renderer again: that would tell us whether the current UK export is
 being returned with a changed schema or blocked by the host.
+
+
+## v1.0.5 airspace loader
+
+The loader now handles all four OpenAIP daily export forms that are useful
+here: GeoJSON, ND-GeoJSON, JSON and the older XML export. OpenAIP's published
+export guidance lists these formats and the `asp` object type for airspace.
+citeturn0search0
+
+It also handles JSON response wrappers such as `items`, `data`, `results`,
+`airspaces` and `features`, and recognises nested `geometry` objects.
+
+The browser console now reports which export actually supplied the features,
+or why each source failed.

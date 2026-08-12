@@ -1,11 +1,12 @@
 export const DATA_URLS = {
   airports: "https://davidmegginson.github.io/ourairports-data/airports.csv",
-  // OpenAIP publishes daily country/object exports. Prefer GeoJSON here;
-  // XML is retained as a fallback for older/alternate exports.
+
+  // OpenAIP daily exports. ND-GeoJSON is included because current exports
+  // can be newline-delimited rather than one FeatureCollection.
   airspace: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.geojson",
-  airspaceXml: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.xml",
-  reportingPoints: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_rpp.geojson",
-  reportingPointsXml: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_rpp.xml"
+  airspaceNd: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.ndgeojson",
+  airspaceJson: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.json",
+  airspaceXml: "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.xml"
 };
 
 export const DEFAULT_CENTER = [-2.4, 54.5];

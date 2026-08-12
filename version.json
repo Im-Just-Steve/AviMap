@@ -1,6 +1,6 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Robust OpenAIP airspace loading: GeoJSON first, XML fallback, namespace-tolerant parsing, and zero-feature detection."
+  "releaseNotes": "Airspace loader now supports GeoJSON, ND-GeoJSON, JSON response objects and XML fallback, with explicit diagnostics."
 }

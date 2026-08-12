@@ -15,66 +15,96 @@ export async function loadAviationData(onProgress = () => {}) {
     onProgress(`Loaded ${result.airports.length.toLocaleString()} UK airports / aerodromes`);
   } catch (error) {
     console.warn("AviMap airport data failed:", error);
-    onProgress("Airport data unavailable — map remains available.");
   }
 
   onProgress("Loading UK airspace…");
   try {
-    result.airspace = await loadGeoJsonOrXml(
-      DATA_URLS.airspace,
-      DATA_URLS.airspaceXml,
-      parseOpenAipAirspaceXml
-    );
+    result.airspace = await loadAirspace();
+    if (!result.airspace.features.length) throw new Error("No airspace features recognised");
     onProgress(`Loaded ${result.airspace.features.length.toLocaleString()} UK airspaces`);
   } catch (error) {
-    console.warn("AviMap airspace data failed:", error);
-    onProgress("UK airspace data unavailable.");
+    console.error("AviMap airspace load failed:", error);
+    onProgress("UK airspace unavailable — map remains available.");
   }
 
-  onProgress("Loading UK reporting points…");
+  // Reporting points are not allowed to block airspace.
   try {
-    result.reportingPoints = await loadGeoJsonOrXml(
-      DATA_URLS.reportingPoints,
-      DATA_URLS.reportingPointsXml,
-      parseOpenAipPointsXml
-    );
-    onProgress(`Loaded ${result.reportingPoints.features.length.toLocaleString()} UK reporting points`);
-  } catch (error) {
-    console.warn("AviMap reporting point data failed:", error);
-    onProgress("Reporting-point data unavailable.");
-  }
+    result.reportingPoints = await loadOptionalGeoJson(DATA_URLS.airspaceJson);
+  } catch {}
 
   return result;
 }
 
-async function loadGeoJsonOrXml(geojsonUrl, xmlUrl, xmlParser) {
-  try {
-    const response = await fetchWithTimeout(geojsonUrl, 20000);
-    assertOk(response);
-    const text = await response.text();
+async function loadAirspace() {
+  const attempts = [
+    ["GeoJSON", DATA_URLS.airspace, "json"],
+    ["ND-GeoJSON", DATA_URLS.airspaceNd, "ndjson"],
+    ["JSON", DATA_URLS.airspaceJson, "json"],
+    ["XML", DATA_URLS.airspaceXml, "xml"]
+  ];
 
-    // Some endpoints return JSON with a normal application/json content type;
-    // parsing the text makes this resilient to incorrect server MIME types.
+  const errors = [];
+
+  for (const [label, url, format] of attempts) {
     try {
-      const json = JSON.parse(text);
-      const geo = normaliseGeoJson(json);
-      if (geo.features.length) return geo;
-    } catch {
-      // Try XML fallback below.
+      const response = await fetchWithTimeout(url, 20000);
+      assertOk(response);
+      const text = await response.text();
+
+      let parsed;
+      if (format === "ndjson") {
+        parsed = parseNdJsonAirspace(text);
+      } else if (format === "xml") {
+        parsed = parseOpenAipAirspaceXml(text);
+      } else {
+        parsed = parseJsonAirspace(text);
+      }
+
+      if (parsed.features.length) {
+        console.info(`AviMap: ${label} airspace export supplied ${parsed.features.length} features.`);
+        return parsed;
+      }
+
+      errors.push(`${label}: zero features`);
+    } catch (error) {
+      errors.push(`${label}: ${error.message}`);
     }
-  } catch (error) {
-    console.warn("GeoJSON aviation export unavailable:", error);
   }
 
-  const xml = await fetchWithTimeout(xmlUrl, 20000)
-    .then(assertOk)
-    .then(r => r.text());
+  throw new Error(errors.join(" | "));
+}
 
-  const parsed = xmlParser(xml);
-  if (!parsed.features.length) {
-    throw new Error("Aviation export loaded but contained zero recognised features");
+async function loadOptionalGeoJson(url) {
+  const response = await fetchWithTimeout(url, 10000);
+  assertOk(response);
+  return normaliseGeoJson(JSON.parse(await response.text()));
+}
+
+function parseJsonAirspace(text) {
+  const data = JSON.parse(text);
+
+  // Standard GeoJSON FeatureCollection / Feature.
+  const standard = normaliseGeoJson(data);
+  if (standard.features.length) return standard;
+
+  // OpenAIP JSON may be a response object containing an array.
+  const candidates = [];
+  for (const key of ["items", "data", "results", "airspaces", "features"]) {
+    if (Array.isArray(data?.[key])) candidates.push(...data[key]);
   }
-  return parsed;
+  if (Array.isArray(data)) candidates.push(...data);
+
+  return normaliseAirspaceObjects(candidates);
+}
+
+function parseNdJsonAirspace(text) {
+  const objects = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try { objects.push(JSON.parse(trimmed)); } catch {}
+  }
+  return normaliseAirspaceObjects(objects);
 }
 
 function normaliseGeoJson(input) {
@@ -83,70 +113,83 @@ function normaliseGeoJson(input) {
   if (input.type === "FeatureCollection") {
     return {
       type: "FeatureCollection",
-      features: (input.features || []).filter(Boolean).map((feature, i) => ({
-        ...feature,
+      features: (input.features || []).filter(f => f?.geometry).map((f, i) => ({
+        ...f,
         properties: {
-          ...(feature.properties || {}),
-          name: feature.properties?.name ||
-            feature.properties?.NAME ||
-            feature.properties?.designator ||
-            feature.properties?.DESIGNATOR ||
-            `AREA ${i + 1}`,
-          type: feature.properties?.type ||
-            feature.properties?.category ||
-            feature.properties?.CATEGORY ||
-            feature.properties?.class ||
-            feature.properties?.AC ||
-            ""
+          ...(f.properties || {}),
+          name: f.properties?.name || f.properties?.NAME || `AIRSPACE ${i + 1}`,
+          type: f.properties?.type || f.properties?.category ||
+            f.properties?.CATEGORY || f.properties?.class || ""
         }
       }))
     };
   }
 
-  // Be tolerant of a single GeoJSON feature.
-  if (input.type === "Feature") {
-    return {
-      type: "FeatureCollection",
-      features: [input]
-    };
+  if (input.type === "Feature" && input.geometry) {
+    return { type: "FeatureCollection", features: [input] };
   }
 
   return emptyFeatureCollection();
+}
+
+function normaliseAirspaceObjects(items) {
+  const features = [];
+
+  for (const item of items || []) {
+    if (!item) continue;
+
+    if (item.type === "Feature" && item.geometry) {
+      features.push(item);
+      continue;
+    }
+
+    const geometry = item.geometry || item.geojson || item.geoJson || item.location?.geometry;
+    if (geometry?.type && geometry?.coordinates) {
+      features.push({
+        type: "Feature",
+        id: item.id || item._id,
+        properties: {
+          ...item,
+          name: item.name || item.designator || item.identifier || item._id || "Airspace",
+          type: item.type || item.category || item.airspaceType || item.class || ""
+        },
+        geometry
+      });
+      continue;
+    }
+
+    // Some APIs return the geometry as a nested GeoJSON Feature.
+    const nested = item.feature || item.geoJsonFeature;
+    if (nested?.geometry) features.push(nested);
+  }
+
+  return { type: "FeatureCollection", features: features.filter(f => validGeometry(f.geometry)) };
+}
+
+function validGeometry(g) {
+  return g && ["Polygon", "MultiPolygon", "LineString", "MultiLineString"].includes(g.type) &&
+    Array.isArray(g.coordinates) && g.coordinates.length > 0;
 }
 
 function parseOpenAipAirspaceXml(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("Invalid OpenAIP XML");
 
-  // Use local-name() so this continues to work if a namespace is introduced.
-  const airspaces = [...doc.getElementsByTagNameNS("*", "ASP")];
   const features = [];
+  const airspaces = [...doc.getElementsByTagNameNS("*", "ASP")];
 
   for (const asp of airspaces) {
     const category = asp.getAttribute("CATEGORY") || "OTHER";
     const name = childText(asp, "NAME") || category;
-    const id = childText(asp, "ID") || `${category}-${features.length}`;
 
-    const polygons = [...asp.getElementsByTagNameNS("*", "POLYGON")];
-    for (const polygon of polygons) {
+    for (const polygon of [...asp.getElementsByTagNameNS("*", "POLYGON")]) {
       const coords = parseCoordinateList(polygon.textContent);
       if (coords.length < 3) continue;
 
       features.push({
         type: "Feature",
-        properties: {
-          id,
-          name,
-          category,
-          type: category,
-          country: childText(asp, "COUNTRY") || "GB",
-          top: formatAltLimit(asp, "ALTLIMIT_TOP"),
-          bottom: formatAltLimit(asp, "ALTLIMIT_BOTTOM")
-        },
-        geometry: {
-          type: "Polygon",
-          coordinates: [ensureClosed(coords)]
-        }
+        properties: { name, category, type: category },
+        geometry: { type: "Polygon", coordinates: [ensureClosed(coords)] }
       });
     }
   }
@@ -154,66 +197,20 @@ function parseOpenAipAirspaceXml(xmlText) {
   return { type: "FeatureCollection", features };
 }
 
-function parseOpenAipPointsXml(xmlText) {
-  const doc = new DOMParser().parseFromString(xmlText, "application/xml");
-  if (doc.querySelector("parsererror")) throw new Error("Invalid OpenAIP XML");
-
-  const candidates = [
-    ...doc.getElementsByTagNameNS("*", "WAYPOINT"),
-    ...doc.getElementsByTagNameNS("*", "REPORTINGPOINT"),
-    ...doc.getElementsByTagNameNS("*", "REPORTING_POINT")
-  ];
-
-  const features = [];
-  for (const point of candidates) {
-    const lat = Number(childText(point, "LAT"));
-    const lon = Number(childText(point, "LON"));
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-
-    const name = childText(point, "NAME") ||
-      childText(point, "IDENT") ||
-      childText(point, "DESIGNATOR") || "VRP";
-
-    features.push({
-      type: "Feature",
-      properties: {
-        name,
-        ident: childText(point, "IDENT") || name,
-        country: childText(point, "COUNTRY") || "GB"
-      },
-      geometry: { type: "Point", coordinates: [lon, lat] }
-    });
-  }
-
-  return { type: "FeatureCollection", features };
-}
-
-function childText(parent, localName) {
-  const nodes = parent.getElementsByTagNameNS("*", localName);
-  return nodes[0]?.textContent?.trim() || "";
+function childText(parent, name) {
+  return parent.getElementsByTagNameNS("*", name)[0]?.textContent?.trim() || "";
 }
 
 function parseCoordinateList(text) {
   return String(text).split(",")
-    .map(pair => pair.trim().split(/\s+/).map(Number))
+    .map(p => p.trim().split(/\s+/).map(Number))
     .filter(p => p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
     .map(p => [p[0], p[1]]);
 }
 
 function ensureClosed(coords) {
-  const first = coords[0];
-  const last = coords[coords.length - 1];
-  return first[0] === last[0] && first[1] === last[1]
-    ? coords
-    : [...coords, [...first]];
-}
-
-function formatAltLimit(asp, name) {
-  const nodes = asp.getElementsByTagNameNS("*", name);
-  const alt = nodes[0]?.getElementsByTagNameNS("*", "ALT")?.[0];
-  return alt
-    ? `${alt.textContent.trim()} ${alt.getAttribute("UNIT") || ""}`.trim()
-    : "";
+  const a = coords[0], b = coords[coords.length - 1];
+  return a[0] === b[0] && a[1] === b[1] ? coords : [...coords, [...a]];
 }
 
 function parseAirports(csv) {
