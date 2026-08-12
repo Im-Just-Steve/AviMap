@@ -884,10 +884,1191 @@ jobs:
           PY
 
 
+
       # ============================================================
-      # DOWNLOAD NATS VRP
+      # FORENSIC NATS MATZ / EGUL DIAGNOSTIC
+      #
+      # This step deliberately does NOT modify the AIXM data.
+      # It searches the raw NATS AIXM for the known Lakenheath
+      # MATZ location and reports exactly how NATS represents it.
       # ============================================================
 
+      - name: Forensic search for EGUL / Lakenheath MATZ
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import json
+          import math
+          import re
+          import xml.etree.ElementTree as ET
+
+          from pathlib import Path
+
+
+          XML_FILE = "/tmp/uk-aip.xml"
+
+          TARGET_LAT = 52.4094028
+          TARGET_LON = 0.5610111
+
+          # The known Lakenheath MATZ is approximately 5 NM radius.
+          # Search generously so that we catch the ATZ, MATZ, stubs,
+          # referenced geometry and nearby airspace objects.
+          SEARCH_NM = 8.0
+
+
+          def local(tag):
+              return tag.rsplit("}", 1)[-1]
+
+
+          def attr(element, name):
+              if element is None:
+                  return None
+
+              wanted = name.lower()
+
+              for key, value in element.attrib.items():
+                  if local(key).lower() == wanted:
+                      return value
+
+              return None
+
+
+          def parse_numbers(value):
+              if not value:
+                  return []
+
+              result = []
+
+              for token in re.split(r"[\s,]+", value.strip()):
+                  if not token:
+                      continue
+
+                  try:
+                      result.append(float(token))
+                  except ValueError:
+                      pass
+
+              return result
+
+
+          def haversine_nm(lat1, lon1, lat2, lon2):
+              radius_km = 6371.0088
+
+              p1 = math.radians(lat1)
+              p2 = math.radians(lat2)
+
+              dp = math.radians(
+                  lat2 - lat1
+              )
+
+              dl = math.radians(
+                  lon2 - lon1
+              )
+
+              a = (
+                  math.sin(dp / 2) ** 2
+                  +
+                  math.cos(p1)
+                  *
+                  math.cos(p2)
+                  *
+                  math.sin(dl / 2) ** 2
+              )
+
+              distance_km = (
+                  2
+                  *
+                  radius_km
+                  *
+                  math.asin(
+                      math.sqrt(a)
+                  )
+              )
+
+              return distance_km / 1.852
+
+
+          def coordinate_candidates(node):
+              """
+              Return both possible coordinate axis interpretations.
+
+              We deliberately test both orders because this is a
+              forensic diagnostic and we do not want an unexpected
+              CRS axis convention to hide the EGUL geometry.
+              """
+
+              tag = local(node.tag)
+
+              if tag not in {
+                  "pos",
+                  "posList",
+                  "coordinates"
+              }:
+                  return []
+
+              values = parse_numbers(
+                  node.text
+              )
+
+              if not values:
+                  return []
+
+              pairs = []
+
+              if tag == "posList":
+
+                  try:
+                      dimension = int(
+                          attr(
+                              node,
+                              "srsDimension"
+                          )
+                          or "2"
+                      )
+                  except ValueError:
+                      dimension = 2
+
+                  dimension = max(
+                      2,
+                      dimension
+                  )
+
+                  for i in range(
+                      0,
+                      len(values),
+                      dimension
+                  ):
+
+                      part = values[
+                          i:i + dimension
+                      ]
+
+                      if len(part) >= 2:
+                          pairs.append(
+                              (
+                                  part[0],
+                                  part[1]
+                              )
+                          )
+
+              else:
+
+                  if len(values) >= 2:
+                      pairs.append(
+                          (
+                              values[0],
+                              values[1]
+                          )
+                      )
+
+
+              result = []
+
+              for first, second in pairs:
+
+                  # lat/lon
+                  if (
+                      -90 <= first <= 90
+                      and
+                      -180 <= second <= 180
+                  ):
+
+                      result.append(
+                          (
+                              first,
+                              second,
+                              "lat-lon"
+                          )
+                      )
+
+                  # lon/lat
+                  if (
+                      -180 <= first <= 180
+                      and
+                      -90 <= second <= 90
+                  ):
+
+                      result.append(
+                          (
+                              second,
+                              first,
+                              "lon-lat"
+                          )
+                      )
+
+              return result
+
+
+          def first_value(
+              element,
+              names
+          ):
+
+              wanted = {
+                  name.lower()
+                  for name in names
+              }
+
+              for node in element.iter():
+
+                  if (
+                      local(
+                          node.tag
+                      ).lower()
+                      in wanted
+                      and
+                      node.text
+                  ):
+
+                      value = node.text.strip()
+
+                      if value:
+                          return value
+
+              return ""
+
+
+          # ========================================================
+          # LOAD XML
+          # ========================================================
+
+          tree = ET.parse(
+              XML_FILE
+          )
+
+          root = tree.getroot()
+
+
+          # ========================================================
+          # BUILD GLOBAL ID / HREF INDEX
+          #
+          # This is the important addition over the previous
+          # diagnostic. AIXM commonly stores geometry separately
+          # and references it with xlink:href.
+          # ========================================================
+
+          id_index = {}
+
+
+          def add_id(
+              value,
+              element
+          ):
+
+              if not value:
+                  return
+
+              value = value.strip()
+
+              if not value:
+                  return
+
+              candidates = {
+                  value,
+                  value.lstrip("#")
+              }
+
+              if "#" in value:
+                  candidates.add(
+                      value.rsplit(
+                          "#",
+                          1
+                      )[-1]
+                  )
+
+              if value.startswith(
+                  "urn:uuid:"
+              ):
+                  candidates.add(
+                      value[9:]
+                  )
+
+              for candidate in candidates:
+                  id_index[
+                      candidate
+                  ] = element
+
+
+          for element in root.iter():
+
+              for key, value in element.attrib.items():
+
+                  lname = local(
+                      key
+                  ).lower()
+
+                  if lname in {
+                      "id",
+                      "uuid",
+                      "identifier"
+                  }:
+
+                      add_id(
+                          value,
+                          element
+                      )
+
+
+          def resolve(
+              value
+          ):
+
+              if not value:
+                  return None
+
+              candidates = [
+                  value,
+                  value.lstrip("#")
+              ]
+
+              if "#" in value:
+                  candidates.append(
+                      value.rsplit(
+                          "#",
+                          1
+                      )[-1]
+                  )
+
+              if value.startswith(
+                  "urn:uuid:"
+              ):
+                  candidates.append(
+                      value[9:]
+                  )
+
+              for candidate in candidates:
+
+                  if candidate in id_index:
+                      return id_index[
+                          candidate
+                      ]
+
+              return None
+
+
+          def href_target(
+              element
+          ):
+
+              return resolve(
+                  attr(
+                      element,
+                      "href"
+                  )
+              )
+
+
+          # ========================================================
+          # AIRSPACE OBJECTS
+          # ========================================================
+
+          airspaces = [
+              node
+              for node in root.iter()
+              if local(
+                  node.tag
+              ) == "Airspace"
+          ]
+
+
+          print("")
+          print(
+              "=========================================="
+          )
+
+          print(
+              "EGUL / MATZ FORENSIC NATS SEARCH"
+          )
+
+          print(
+              "=========================================="
+          )
+
+          print("")
+          print(
+              "Target latitude:",
+              TARGET_LAT
+          )
+
+          print(
+              "Target longitude:",
+              TARGET_LON
+          )
+
+          print(
+              "Search radius:",
+              SEARCH_NM,
+              "NM"
+          )
+
+          print(
+              "NATS Airspace objects:",
+              len(
+                  airspaces
+              )
+          )
+
+          print(
+              "Global XML identifiers:",
+              len(
+                  id_index
+              )
+          )
+
+
+          # ========================================================
+          # FIND EVERY GEOMETRY OBJECT IN THE ENTIRE AIXM DOCUMENT
+          # ========================================================
+
+          geometry_names = {
+              "Surface",
+              "CompositeSurface",
+              "PolygonPatch",
+              "Ring",
+              "LinearRing",
+              "Curve",
+              "LineStringSegment",
+              "GeodesicString",
+              "ArcString",
+              "ArcStringByBulge",
+              "CircleByCenterPoint",
+              "ArcByCenterPoint"
+          }
+
+
+          geometry_objects = [
+              node
+              for node in root.iter()
+              if local(
+                  node.tag
+              ) in geometry_names
+          ]
+
+
+          print(
+              "Geometry objects in XML:",
+              len(
+                  geometry_objects
+              )
+          )
+
+
+          # ========================================================
+          # TRACE ALL REFERENCES FROM AN AIRSPACE
+          # ========================================================
+
+          def reachable(
+              start
+          ):
+
+              queue = [
+                  start
+              ]
+
+              result = []
+
+              seen = set()
+
+
+              while queue:
+
+                  current = queue.pop()
+
+                  if current is None:
+                      continue
+
+                  marker = id(
+                      current
+                  )
+
+                  if marker in seen:
+                      continue
+
+                  seen.add(
+                      marker
+                  )
+
+                  result.append(
+                      current
+                  )
+
+
+                  for child in current.iter():
+
+                      target = href_target(
+                          child
+                      )
+
+                      if target is not None:
+                          queue.append(
+                              target
+                          )
+
+
+              return result
+
+
+          # ========================================================
+          # EXTRACT COORDINATE EVIDENCE FROM AN OBJECT
+          # ========================================================
+
+          def object_coordinates(
+              object_node
+          ):
+
+              output = []
+
+              for node in object_node.iter():
+
+                  for lat, lon, ordering in coordinate_candidates(
+                      node
+                  ):
+
+                      distance = haversine_nm(
+                          TARGET_LAT,
+                          TARGET_LON,
+                          lat,
+                          lon
+                      )
+
+                      if distance <= SEARCH_NM:
+
+                          output.append(
+                              {
+                                  "tag":
+                                      local(
+                                          node.tag
+                                      ),
+
+                                  "lat":
+                                      lat,
+
+                                  "lon":
+                                      lon,
+
+                                  "ordering":
+                                      ordering,
+
+                                  "distance_nm":
+                                      distance,
+
+                                  "srs":
+                                      attr(
+                                          node,
+                                          "srsName"
+                                      ),
+
+                                  "node_id":
+                                      attr(
+                                          node,
+                                          "id"
+                                      ),
+
+                                  "href":
+                                      attr(
+                                          node,
+                                          "href"
+                                      )
+                              }
+                          )
+
+              return output
+
+
+          # ========================================================
+          # SEARCH AIRSPACE OBJECTS
+          # ========================================================
+
+          matches = []
+
+
+          for index, airspace in enumerate(
+              airspaces,
+              start=1
+          ):
+
+              identifier = (
+                  attr(
+                      airspace,
+                      "id"
+                  )
+                  or
+                  attr(
+                      airspace,
+                      "uuid"
+                  )
+                  or
+                  ""
+              )
+
+
+              designator = first_value(
+                  airspace,
+                  {
+                      "designator"
+                  }
+              )
+
+
+              name = first_value(
+                  airspace,
+                  {
+                      "name"
+                  }
+              )
+
+
+              airspace_type = first_value(
+                  airspace,
+                  {
+                      "type",
+                      "AirspaceType"
+                  }
+              )
+
+
+              local_type = first_value(
+                  airspace,
+                  {
+                      "localType",
+                      "AirspaceLocalType"
+                  }
+              )
+
+
+              airspace_class = first_value(
+                  airspace,
+                  {
+                      "class",
+                      "AirspaceClass"
+                  }
+              )
+
+
+              # ----------------------------------------------------
+              # Text search across the Airspace AND referenced
+              # geometry objects.
+              # ----------------------------------------------------
+
+              reachable_objects = reachable(
+                  airspace
+              )
+
+
+              combined_text = " ".join(
+                  (
+                      node.text
+                      or
+                      ""
+                  ).strip()
+                  for object_node in reachable_objects
+                  for node in object_node.iter()
+                  if (
+                      node.text
+                      and
+                      node.text.strip()
+                  )
+              )
+
+
+              upper_text = combined_text.upper()
+
+
+              textual_match = any(
+                  token in upper_text
+                  for token in (
+                      "EGUL",
+                      "LAKENHEATH",
+                      "52.409",
+                      "0.561",
+                      "N52 24",
+                      "E000 33",
+                      "522433",
+                      "000333"
+                  )
+              )
+
+
+              # ----------------------------------------------------
+              # Spatial search through both inline and referenced
+              # geometry.
+              # ----------------------------------------------------
+
+              coordinate_matches = []
+
+
+              for object_node in reachable_objects:
+
+                  coordinate_matches.extend(
+                      object_coordinates(
+                          object_node
+                      )
+                  )
+
+
+              minimum_distance = None
+
+
+              if coordinate_matches:
+
+                  minimum_distance = min(
+                      item[
+                          "distance_nm"
+                      ]
+                      for item in coordinate_matches
+                  )
+
+
+              if (
+                  textual_match
+                  or
+                  coordinate_matches
+              ):
+
+                  matches.append(
+                      {
+                          "index":
+                              index,
+
+                          "id":
+                              identifier,
+
+                          "designator":
+                              designator,
+
+                          "name":
+                              name,
+
+                          "type":
+                              airspace_type,
+
+                          "local_type":
+                              local_type,
+
+                          "class":
+                              airspace_class,
+
+                          "textual_match":
+                              textual_match,
+
+                          "minimum_distance_nm":
+                              minimum_distance,
+
+                          "coordinate_matches":
+                              coordinate_matches,
+
+                          "reachable_tags":
+                              sorted(
+                                  {
+                                      local(
+                                          node.tag
+                                      )
+                                      for object_node
+                                      in reachable_objects
+                                      for node
+                                      in object_node.iter()
+                                  }
+                              )
+                      }
+                  )
+
+
+          # ========================================================
+          # ALSO SEARCH STANDALONE GEOMETRY OBJECTS
+          #
+          # This catches geometry which is not reachable through the
+          # Airspace object by a direct href chain.
+          # ========================================================
+
+          standalone_geometry_matches = []
+
+
+          for geometry in geometry_objects:
+
+              coordinates = object_coordinates(
+                  geometry
+              )
+
+              if not coordinates:
+                  continue
+
+
+              identifier = (
+                  attr(
+                      geometry,
+                      "id"
+                  )
+                  or
+                  attr(
+                      geometry,
+                      "uuid"
+                  )
+                  or
+                  ""
+              )
+
+
+              href = attr(
+                  geometry,
+                  "href"
+              )
+
+
+              standalone_geometry_matches.append(
+                  {
+                      "tag":
+                          local(
+                              geometry.tag
+                          ),
+
+                      "id":
+                          identifier,
+
+                      "href":
+                          href,
+
+                      "coordinates":
+                          coordinates
+                  }
+              )
+
+
+          # ========================================================
+          # REPORT AIRSPACE MATCHES
+          # ========================================================
+
+          print("")
+          print(
+              "Potential EGUL-related Airspace objects:",
+              len(
+                  matches
+              )
+          )
+
+
+          if not matches:
+
+              print("")
+              print(
+                  "NO AIRSPACE MATCHES FOUND."
+              )
+
+              print(
+                  "The MATZ may be represented by geometry which is"
+              )
+
+              print(
+                  "not referenced directly from an Airspace object."
+              )
+
+
+          for number, match in enumerate(
+              matches,
+              start=1
+          ):
+
+              print("")
+              print(
+                  "------------------------------------------"
+              )
+
+              print(
+                  f"AIRSPACE MATCH {number}"
+              )
+
+              print(
+                  "------------------------------------------"
+              )
+
+              print(
+                  "Airspace index:",
+                  match[
+                      "index"
+                  ]
+              )
+
+              print(
+                  "gml:id / id:",
+                  match[
+                      "id"
+                  ]
+              )
+
+              print(
+                  "Designator:",
+                  repr(
+                      match[
+                          "designator"
+                      ]
+                  )
+              )
+
+              print(
+                  "Name:",
+                  repr(
+                      match[
+                          "name"
+                      ]
+                  )
+              )
+
+              print(
+                  "Type:",
+                  repr(
+                      match[
+                          "type"
+                      ]
+                  )
+              )
+
+              print(
+                  "Local type:",
+                  repr(
+                      match[
+                          "local_type"
+                      ]
+                  )
+              )
+
+              print(
+                  "Class:",
+                  repr(
+                      match[
+                          "class"
+                      ]
+                  )
+              )
+
+              print(
+                  "Textual match:",
+                  match[
+                      "textual_match"
+                  ]
+              )
+
+              print(
+                  "Nearest geometry coordinate:",
+                  match[
+                      "minimum_distance_nm"
+                  ]
+              )
+
+
+              print("")
+              print(
+                  "Referenced/reachable geometry tags:"
+              )
+
+
+              for tag in match[
+                  "reachable_tags"
+              ]:
+
+                  print(
+                      "  ",
+                      tag
+                  )
+
+
+              print("")
+              print(
+                  "Nearby coordinate evidence:"
+              )
+
+
+              for item in match[
+                  "coordinate_matches"
+              ][
+                  :100
+              ]:
+
+                  print(
+                      "  ",
+                      item
+                  )
+
+
+              airspace = airspaces[
+                  match[
+                      "index"
+                  ] - 1
+              ]
+
+
+              safe_id = re.sub(
+                  r"[^A-Za-z0-9_.-]",
+                  "_",
+                  match[
+                      "id"
+                  ]
+                  or
+                  f"match_{number}"
+              )
+
+
+              output_path = Path(
+                  f"/tmp/egul-airspace-{number}-{safe_id}.xml"
+              )
+
+
+              output_path.write_bytes(
+                  ET.tostring(
+                      airspace,
+                      encoding="utf-8",
+                      xml_declaration=True
+                  )
+              )
+
+
+              print("")
+              print(
+                  "Complete Airspace XML:",
+                  output_path
+              )
+
+
+          # ========================================================
+          # REPORT STANDALONE GEOMETRY
+          # ========================================================
+
+          print("")
+          print(
+              "=========================================="
+          )
+
+          print(
+              "STANDALONE GEOMETRY NEAR EGUL"
+          )
+
+          print(
+              "=========================================="
+          )
+
+          print("")
+          print(
+              "Geometry objects with coordinates within",
+              SEARCH_NM,
+              "NM:",
+              len(
+                  standalone_geometry_matches
+              )
+          )
+
+
+          for number, match in enumerate(
+              standalone_geometry_matches,
+              start=1
+          ):
+
+              print("")
+              print(
+                  f"GEOMETRY MATCH {number}"
+              )
+
+              print(
+                  "  tag:",
+                  match[
+                      "tag"
+                  ]
+              )
+
+              print(
+                  "  id:",
+                  match[
+                      "id"
+                  ]
+              )
+
+              print(
+                  "  href:",
+                  match[
+                      "href"
+                  ]
+              )
+
+              for item in match[
+                  "coordinates"
+              ][
+                  :20
+              ]:
+
+                  print(
+                      "  coordinate:",
+                      item
+                  )
+
+
+          # ========================================================
+          # SAVE MACHINE-READABLE SUMMARY
+          # ========================================================
+
+          summary = {
+              "target": {
+                  "latitude":
+                      TARGET_LAT,
+
+                  "longitude":
+                      TARGET_LON,
+
+                  "search_radius_nm":
+                      SEARCH_NM
+              },
+
+              "airspace_matches":
+                  matches,
+
+              "standalone_geometry_matches":
+                  standalone_geometry_matches
+          }
+
+
+          Path(
+              "/tmp/egul-matz-forensic-summary.json"
+          ).write_text(
+              json.dumps(
+                  summary,
+                  indent=2,
+                  ensure_ascii=False
+              ),
+              encoding="utf-8"
+          )
+
+
+          print("")
+          print(
+              "=========================================="
+          )
+
+          print(
+              "FORENSIC SEARCH COMPLETE"
+          )
+
+          print(
+              "=========================================="
+          )
+
+          print("")
+          print(
+              "Airspace matches:",
+              len(
+                  matches
+              )
+          )
+
+          print(
+              "Standalone geometry matches:",
+              len(
+                  standalone_geometry_matches
+              )
+          )
+
+          print(
+              "Summary:",
+              "/tmp/egul-matz-forensic-summary.json"
+          )
+
+          PY
       - name: Download NATS VRP dataset
         run: |
           set -euo pipefail
