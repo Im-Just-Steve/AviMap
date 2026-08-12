@@ -513,10 +513,14 @@ function createAircraftElement() {
   wrapper.className = "aircraft-marker";
   wrapper.setAttribute("aria-label", "Aircraft position");
 
-  const icon = document.createElement("div");
+  const icon = document.createElement("img");
   icon.className = "aircraft-icon";
-  wrapper.appendChild(icon);
+  icon.src = "./assets/aircraft-marker.png";
+  icon.alt = "";
+  icon.draggable = false;
+  icon.decoding = "async";
 
+  wrapper.appendChild(icon);
   return wrapper;
 }
 

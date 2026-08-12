@@ -1,6 +1,6 @@
 {
-  "version": "1.0.13.1",
+  "version": "1.0.14",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed aircraft telemetry compatibility with the current Companion's PascalCase JSON properties (Lat/Lon/Altitude/Groundspeed/Heading). Service worker now activates and claims clients immediately."
+  "releaseNotes": "Replaced the temporary CSS aircraft symbol with the supplied top-down aircraft marker artwork. The marker rotates with aircraft heading."
 }

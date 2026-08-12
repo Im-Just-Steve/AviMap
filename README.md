@@ -306,3 +306,12 @@ This was the cause of the console message:
 
 The values themselves were valid; the PWA was simply reading the wrong
 property names.
+
+
+## v1.0.14 aircraft marker
+
+The aircraft position marker now uses the supplied top-down aircraft artwork
+from `assets/aircraft-marker.png`. The image has been prepared with a
+transparent background and is rotated around its centre using the live
+aircraft heading. A heading of 0 degrees points the aircraft north/up on the
+map.
