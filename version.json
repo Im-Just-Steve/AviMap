@@ -1,6 +1,6 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Fixed UK airspace ingestion by parsing the OpenAIP XML export and improved overlay visibility."
+  "releaseNotes": "Robust OpenAIP airspace loading: GeoJSON first, XML fallback, namespace-tolerant parsing, and zero-feature detection."
 }

@@ -227,7 +227,7 @@ function normaliseGeoJson(input) {
         properties: {
           ...(f.properties || {}),
           name: f.properties?.name || f.properties?.AN || f.properties?.designator || `AREA ${i + 1}`,
-          type: f.properties?.type || f.properties?.category || f.properties?.class || f.properties?.AC || ""
+          type: f.properties?.type || f.properties?.category || f.properties?.CATEGORY || f.properties?.class || f.properties?.AC || ""
         }
       }))
     };

@@ -1,4 +1,4 @@
-const CACHE = "avimap-v1.0.3";
+const CACHE = "avimap-v1.0.4";
 const CORE = [
   "./",
   "./index.html",

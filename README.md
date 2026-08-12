@@ -123,3 +123,20 @@ stronger fill/outline so the overlay is visible at normal UK map scales.
 
 The current source is development data and is not a substitute for current
 UK AIP/AIS or NOTAM information.
+
+
+## v1.0.4 airspace loading
+
+The status message now counts only successfully parsed features. The loader
+tries the documented OpenAIP `gb_asp.geojson` country/object export first and
+falls back to `gb_asp.xml`. It also accepts a normal GeoJSON FeatureCollection
+and is namespace-tolerant when parsing XML.
+
+OpenAIP documents its daily export naming convention as
+`country_type.format`, including `asp` for airspace and `geojson`, `json`,
+`ndgeojson`, and `xml` formats. citeturn0search0
+
+If both sources load but AviMap still reports zero airspaces, the next useful
+step is to inspect the browser console/network response rather than changing
+the map renderer again: that would tell us whether the current UK export is
+being returned with a changed schema or blocked by the host.

@@ -20,10 +20,12 @@ export async function loadAviationData(onProgress = () => {}) {
 
   onProgress("Loading UK airspace…");
   try {
-    const xml = await fetchWithTimeout(DATA_URLS.airspace, 20000)
-      .then(assertOk).then(r => r.text());
-    result.airspace = parseOpenAipAirspaceXml(xml);
-    onProgress(`Loaded ${result.airspace.features.length.toLocaleString()} UK airspace areas`);
+    result.airspace = await loadGeoJsonOrXml(
+      DATA_URLS.airspace,
+      DATA_URLS.airspaceXml,
+      parseOpenAipAirspaceXml
+    );
+    onProgress(`Loaded ${result.airspace.features.length.toLocaleString()} UK airspaces`);
   } catch (error) {
     console.warn("AviMap airspace data failed:", error);
     onProgress("UK airspace data unavailable.");
@@ -31,9 +33,11 @@ export async function loadAviationData(onProgress = () => {}) {
 
   onProgress("Loading UK reporting points…");
   try {
-    const xml = await fetchWithTimeout(DATA_URLS.reportingPoints, 20000)
-      .then(assertOk).then(r => r.text());
-    result.reportingPoints = parseOpenAipPointsXml(xml);
+    result.reportingPoints = await loadGeoJsonOrXml(
+      DATA_URLS.reportingPoints,
+      DATA_URLS.reportingPointsXml,
+      parseOpenAipPointsXml
+    );
     onProgress(`Loaded ${result.reportingPoints.features.length.toLocaleString()} UK reporting points`);
   } catch (error) {
     console.warn("AviMap reporting point data failed:", error);
@@ -43,17 +47,88 @@ export async function loadAviationData(onProgress = () => {}) {
   return result;
 }
 
+async function loadGeoJsonOrXml(geojsonUrl, xmlUrl, xmlParser) {
+  try {
+    const response = await fetchWithTimeout(geojsonUrl, 20000);
+    assertOk(response);
+    const text = await response.text();
+
+    // Some endpoints return JSON with a normal application/json content type;
+    // parsing the text makes this resilient to incorrect server MIME types.
+    try {
+      const json = JSON.parse(text);
+      const geo = normaliseGeoJson(json);
+      if (geo.features.length) return geo;
+    } catch {
+      // Try XML fallback below.
+    }
+  } catch (error) {
+    console.warn("GeoJSON aviation export unavailable:", error);
+  }
+
+  const xml = await fetchWithTimeout(xmlUrl, 20000)
+    .then(assertOk)
+    .then(r => r.text());
+
+  const parsed = xmlParser(xml);
+  if (!parsed.features.length) {
+    throw new Error("Aviation export loaded but contained zero recognised features");
+  }
+  return parsed;
+}
+
+function normaliseGeoJson(input) {
+  if (!input) return emptyFeatureCollection();
+
+  if (input.type === "FeatureCollection") {
+    return {
+      type: "FeatureCollection",
+      features: (input.features || []).filter(Boolean).map((feature, i) => ({
+        ...feature,
+        properties: {
+          ...(feature.properties || {}),
+          name: feature.properties?.name ||
+            feature.properties?.NAME ||
+            feature.properties?.designator ||
+            feature.properties?.DESIGNATOR ||
+            `AREA ${i + 1}`,
+          type: feature.properties?.type ||
+            feature.properties?.category ||
+            feature.properties?.CATEGORY ||
+            feature.properties?.class ||
+            feature.properties?.AC ||
+            ""
+        }
+      }))
+    };
+  }
+
+  // Be tolerant of a single GeoJSON feature.
+  if (input.type === "Feature") {
+    return {
+      type: "FeatureCollection",
+      features: [input]
+    };
+  }
+
+  return emptyFeatureCollection();
+}
+
 function parseOpenAipAirspaceXml(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("Invalid OpenAIP XML");
 
+  // Use local-name() so this continues to work if a namespace is introduced.
+  const airspaces = [...doc.getElementsByTagNameNS("*", "ASP")];
   const features = [];
-  for (const asp of doc.querySelectorAll("AIRSPACES > ASP")) {
-    const category = asp.getAttribute("CATEGORY") || "OTHER";
-    const name = textOf(asp, "NAME") || category;
-    const id = textOf(asp, "ID") || `${category}-${features.length}`;
 
-    for (const polygon of asp.querySelectorAll("GEOMETRY > POLYGON")) {
+  for (const asp of airspaces) {
+    const category = asp.getAttribute("CATEGORY") || "OTHER";
+    const name = childText(asp, "NAME") || category;
+    const id = childText(asp, "ID") || `${category}-${features.length}`;
+
+    const polygons = [...asp.getElementsByTagNameNS("*", "POLYGON")];
+    for (const polygon of polygons) {
       const coords = parseCoordinateList(polygon.textContent);
       if (coords.length < 3) continue;
 
@@ -64,9 +139,9 @@ function parseOpenAipAirspaceXml(xmlText) {
           name,
           category,
           type: category,
-          country: textOf(asp, "COUNTRY") || "GB",
-          top: formatAltLimit(asp.querySelector("ALTLIMIT_TOP")),
-          bottom: formatAltLimit(asp.querySelector("ALTLIMIT_BOTTOM"))
+          country: childText(asp, "COUNTRY") || "GB",
+          top: formatAltLimit(asp, "ALTLIMIT_TOP"),
+          bottom: formatAltLimit(asp, "ALTLIMIT_BOTTOM")
         },
         geometry: {
           type: "Polygon",
@@ -83,41 +158,39 @@ function parseOpenAipPointsXml(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("Invalid OpenAIP XML");
 
-  const features = [];
   const candidates = [
-    ...doc.querySelectorAll("WAYPOINTS > WAYPOINT"),
-    ...doc.querySelectorAll("WAYPOINTS > REPORTINGPOINT"),
-    ...doc.querySelectorAll("REPORTINGPOINTS > REPORTINGPOINT"),
-    ...doc.querySelectorAll("REPORTING_POINTS > REPORTING_POINT")
+    ...doc.getElementsByTagNameNS("*", "WAYPOINT"),
+    ...doc.getElementsByTagNameNS("*", "REPORTINGPOINT"),
+    ...doc.getElementsByTagNameNS("*", "REPORTING_POINT")
   ];
 
+  const features = [];
   for (const point of candidates) {
-    const lat = Number(textOf(point, "LAT"));
-    const lon = Number(textOf(point, "LON"));
+    const lat = Number(childText(point, "LAT"));
+    const lon = Number(childText(point, "LON"));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
 
-    const name = textOf(point, "NAME") || textOf(point, "IDENT") ||
-      textOf(point, "DESIGNATOR") || "VRP";
+    const name = childText(point, "NAME") ||
+      childText(point, "IDENT") ||
+      childText(point, "DESIGNATOR") || "VRP";
 
     features.push({
       type: "Feature",
       properties: {
         name,
-        ident: textOf(point, "IDENT") || name,
-        country: textOf(point, "COUNTRY") || "GB"
+        ident: childText(point, "IDENT") || name,
+        country: childText(point, "COUNTRY") || "GB"
       },
-      geometry: {
-        type: "Point",
-        coordinates: [lon, lat]
-      }
+      geometry: { type: "Point", coordinates: [lon, lat] }
     });
   }
 
   return { type: "FeatureCollection", features };
 }
 
-function textOf(parent, selector) {
-  return parent.querySelector(selector)?.textContent?.trim() || "";
+function childText(parent, localName) {
+  const nodes = parent.getElementsByTagNameNS("*", localName);
+  return nodes[0]?.textContent?.trim() || "";
 }
 
 function parseCoordinateList(text) {
@@ -135,9 +208,9 @@ function ensureClosed(coords) {
     : [...coords, [...first]];
 }
 
-function formatAltLimit(node) {
-  if (!node) return "";
-  const alt = node.querySelector("ALT");
+function formatAltLimit(asp, name) {
+  const nodes = asp.getElementsByTagNameNS("*", name);
+  const alt = nodes[0]?.getElementsByTagNameNS("*", "ALT")?.[0];
   return alt
     ? `${alt.textContent.trim()} ${alt.getAttribute("UNIT") || ""}`.trim()
     : "";
