@@ -2102,7 +2102,7 @@ jobs:
           TARGET_LAT = 52.4094028
           TARGET_LON = 0.5610111
 
-          SEARCH_NM = 0.15
+          SEARCH_NM = 8.0
 
           OUTPUT_FILE = (
               "/tmp/egul-centre-geometry-owners.txt"
@@ -2115,7 +2115,7 @@ jobs:
           )
 
           print(
-              "TRACE EGUL CENTRE GEOMETRIES"
+              "TRACE ALL EGUL-AREA GEOMETRIES"
           )
 
           print(
@@ -2810,7 +2810,7 @@ jobs:
               "=========================================="
           )
           emit(
-              "EGUL GEOMETRY OWNERS"
+              "EGUL AREA GEOMETRY OWNERS"
           )
           emit(
               "=========================================="
