@@ -40,6 +40,19 @@ jobs:
 
       # ============================================================
       # FIND CURRENT NATS DATASETS
+      #
+      # IMPORTANT:
+      # We do NOT construct the NATS AIP download filename.
+      #
+      # The NATS checklist identifies the dataset, but the actual
+      # downloadable URL is obtained by parsing NATS HTML links.
+      #
+      # We inspect:
+      #   1. The current checklist
+      #   2. The NATS digital-datasets index
+      #   3. Any linked dataset page exposed by those pages
+      #
+      # The actual href supplied by NATS is then used.
       # ============================================================
 
       - name: Find current NATS datasets
@@ -52,14 +65,17 @@ jobs:
           echo ""
 
           python3 <<'PY'
+          import html
           import re
           import urllib.request
           from datetime import datetime, timezone, timedelta
+          from html.parser import HTMLParser
           from pathlib import Path
+          from urllib.parse import urljoin, urlparse
 
-          today = datetime.now(
-              timezone.utc
-          ).date()
+          USER_AGENT = (
+              "AviMap-NATS-Data-Updater/1.0"
+          )
 
           CHECKLIST_BASE = (
               "https://nats-uk.ead-it.com/"
@@ -67,16 +83,21 @@ jobs:
               "digital-datasets/Checklists/"
           )
 
-          DATASET_BASE = (
+          INDEX_URL = (
+              "https://nats-uk.ead-it.com/"
+              "cms-nats/opencms/en/Publications/"
+              "digital-datasets/index.html"
+          )
+
+          DIGITAL_DATASETS_BASE = (
               "https://nats-uk.ead-it.com/"
               "cms-nats/export/sites/default/en/"
               "Publications/digital-datasets/"
           )
 
-          ICAO_AIP_BASE = (
-              DATASET_BASE +
-              "ICAO%20AIP/"
-          )
+          today = datetime.now(
+              timezone.utc
+          ).date()
 
           print(
               "Today (UTC):",
@@ -84,7 +105,256 @@ jobs:
           )
 
           # --------------------------------------------------------
-          # Find latest usable checklist.
+          # HTML link parser
+          # --------------------------------------------------------
+
+          class LinkParser(HTMLParser):
+
+              def __init__(self):
+                  super().__init__(
+                      convert_charrefs=True
+                  )
+
+                  self.links = []
+                  self._href = None
+                  self._text = []
+
+              def handle_starttag(
+                  self,
+                  tag,
+                  attrs
+              ):
+
+                  if tag.lower() != "a":
+                      return
+
+                  attributes = dict(
+                      attrs
+                  )
+
+                  self._href = (
+                      attributes.get("href")
+                  )
+
+                  self._text = []
+
+              def handle_data(
+                  self,
+                  data
+              ):
+
+                  if self._href is not None:
+
+                      self._text.append(
+                          data
+                      )
+
+              def handle_endtag(
+                  self,
+                  tag
+              ):
+
+                  if (
+                      tag.lower() == "a"
+                      and
+                      self._href is not None
+                  ):
+
+                      text = " ".join(
+                          self._text
+                      )
+
+                      self.links.append(
+                          (
+                              self._href,
+                              text
+                          )
+                      )
+
+                      self._href = None
+                      self._text = []
+
+          def fetch(
+              url
+          ):
+
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "User-Agent":
+                          USER_AGENT
+                  }
+              )
+
+              with urllib.request.urlopen(
+                  request,
+                  timeout=45
+              ) as response:
+
+                  body = response.read()
+
+                  content_type = (
+                      response.headers.get(
+                          "Content-Type",
+                          ""
+                      )
+                  )
+
+              return (
+                  body,
+                  content_type
+              )
+
+          def parse_links(
+              base_url,
+              body
+          ):
+
+              parser = LinkParser()
+
+              parser.feed(
+                  body.decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+              )
+
+              result = []
+
+              for href, text in parser.links:
+
+                  if not href:
+
+                      continue
+
+                  absolute = urljoin(
+                      base_url,
+                      html.unescape(
+                          href.strip()
+                      )
+                  )
+
+                  text = re.sub(
+                      r"\s+",
+                      " ",
+                      html.unescape(
+                          text
+                      ).strip()
+                  )
+
+                  result.append(
+                      (
+                          absolute,
+                          text
+                      )
+                  )
+
+              return result
+
+          def normalise(
+              value
+          ):
+
+              return re.sub(
+                  r"[^A-Z0-9]+",
+                  "",
+                  value.upper()
+              )
+
+          def looks_like_aip(
+              url,
+              text,
+              airac
+          ):
+
+              combined = (
+                  f"{url} {text}"
+              ).upper()
+
+              compact = normalise(
+                  combined
+              )
+
+              stamp = airac
+
+              # Exact checklist dataset identity.
+              if (
+                  f"EGAIPDSFULL{stamp}"
+                  in compact
+              ):
+
+                  return True
+
+              # Some NATS download links use AIS naming.
+              if (
+                  f"EGAISDSFULL{stamp}"
+                  in compact
+              ):
+
+                  return True
+
+              # Archive links can use spaces and omit underscores.
+              if (
+                  stamp in compact
+                  and
+                  (
+                      "AIP" in compact
+                      or
+                      "AIS" in compact
+                  )
+                  and
+                  (
+                      "ZIP" in compact
+                      or
+                      "XML" in compact
+                  )
+              ):
+
+                  return True
+
+              return False
+
+          def looks_like_vrp(
+              url,
+              text,
+              airac
+          ):
+
+              combined = (
+                  f"{url} {text}"
+              ).upper()
+
+              compact = normalise(
+                  combined
+              )
+
+              if (
+                  f"EGVRPDSAREA1FULL{airac}"
+                  in compact
+              ):
+
+                  return True
+
+              if (
+                  airac in compact
+                  and
+                  "VRP" in compact
+                  and
+                  (
+                      "CSV" in compact
+                      or
+                      "XLSX" in compact
+                      or
+                      "ZIP" in compact
+                  )
+              ):
+
+                  return True
+
+              return False
+
+          # --------------------------------------------------------
+          # Find latest checklist.
           # --------------------------------------------------------
 
           selected_html = None
@@ -122,50 +392,38 @@ jobs:
 
               for url in candidates:
 
-                  request = urllib.request.Request(
-                      url,
-                      headers={
-                          "User-Agent":
-                          "AviMap-NATS-Data-Updater/1.0"
-                      }
-                  )
-
                   try:
 
-                      with urllib.request.urlopen(
-                          request,
-                          timeout=30
-                      ) as response:
-
-                          html = (
-                              response.read()
-                              .decode(
-                                  "utf-8",
-                                  errors="replace"
-                              )
-                          )
+                      body, _ = fetch(
+                          url
+                      )
 
                   except Exception:
 
                       continue
 
+                  text = body.decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+
                   if (
-                      "EG_AIP_DS_FULL_" not in html
+                      "EG_AIP_DS_FULL_" not in text
                       or
-                      "EG_VRP_DS_AREA1_FULL_" not in html
+                      "EG_VRP_DS_AREA1_FULL_" not in text
                   ):
 
                       continue
 
-                  if (
-                      selected_date is None
-                      or
-                      date > selected_date
-                  ):
+                  selected_html = body
+                  selected_url = url
+                  selected_date = date
 
-                      selected_date = date
-                      selected_url = url
-                      selected_html = html
+                  break
+
+              if selected_html is not None:
+
+                  break
 
           if selected_html is None:
 
@@ -187,13 +445,18 @@ jobs:
               selected_date
           )
 
+          checklist_text = selected_html.decode(
+              "utf-8",
+              errors="replace"
+          )
+
           # --------------------------------------------------------
-          # Find current AIP AIRAC.
+          # Determine AIP AIRAC.
           # --------------------------------------------------------
 
           aip_matches = re.findall(
               r"EG_AIP_DS_FULL_(\d{8})\.XML",
-              selected_html,
+              checklist_text,
               flags=re.I
           )
 
@@ -204,7 +467,7 @@ jobs:
                   "AIP XML dataset."
               )
 
-          aip_stamps = []
+          aip_candidates = []
 
           for stamp in aip_matches:
 
@@ -221,31 +484,35 @@ jobs:
 
               if date <= today:
 
-                  aip_stamps.append(
+                  aip_candidates.append(
                       (
                           date,
                           stamp
                       )
                   )
 
-          if not aip_stamps:
+          if not aip_candidates:
 
               raise SystemExit(
                   "ERROR: No current AIP AIRAC found."
               )
 
           aip_date, aip_stamp = max(
-              aip_stamps,
-              key=lambda item: item[0]
+              aip_candidates,
+              key=lambda x: x[0]
+          )
+
+          aip_filename = (
+              f"EG_AIP_DS_FULL_{aip_stamp}.XML"
           )
 
           # --------------------------------------------------------
-          # Find current VRP AIRAC.
+          # Determine VRP AIRAC.
           # --------------------------------------------------------
 
           vrp_matches = re.findall(
               r"EG_VRP_DS_AREA1_FULL_(\d{8})\.CSV",
-              selected_html,
+              checklist_text,
               flags=re.I
           )
 
@@ -253,10 +520,10 @@ jobs:
 
               raise SystemExit(
                   "ERROR: NATS checklist contains no "
-                  "VRP CSV dataset."
+                  "VRP dataset."
               )
 
-          vrp_stamps = []
+          vrp_candidates = []
 
           for stamp in vrp_matches:
 
@@ -273,78 +540,316 @@ jobs:
 
               if date <= today:
 
-                  vrp_stamps.append(
+                  vrp_candidates.append(
                       (
                           date,
                           stamp
                       )
                   )
 
-          if not vrp_stamps:
+          if not vrp_candidates:
 
               raise SystemExit(
                   "ERROR: No current VRP AIRAC found."
               )
 
           vrp_date, vrp_stamp = max(
-              vrp_stamps,
-              key=lambda item: item[0]
-          )
-
-          aip_filename = (
-              f"EG_AIP_DS_FULL_{aip_stamp}.XML"
+              vrp_candidates,
+              key=lambda x: x[0]
           )
 
           vrp_filename = (
               f"EG_VRP_DS_AREA1_FULL_{vrp_stamp}.CSV"
           )
 
+          print("")
+          print(
+              "AIP AIRAC:",
+              aip_stamp
+          )
+
+          print(
+              "AIP checklist dataset:",
+              aip_filename
+          )
+
+          print("")
+          print(
+              "VRP AIRAC:",
+              vrp_stamp
+          )
+
+          print(
+              "VRP checklist dataset:",
+              vrp_filename
+          )
+
           # --------------------------------------------------------
-          # NATS archive naming convention.
+          # Parse checklist links.
+          # --------------------------------------------------------
+
+          checklist_links = parse_links(
+              selected_url,
+              selected_html
+          )
+
+          print("")
+          print(
+              "Checklist links found:",
+              len(checklist_links)
+          )
+
+          # --------------------------------------------------------
+          # Fetch digital dataset index.
+          # --------------------------------------------------------
+
+          print("")
+          print(
+              "Downloading NATS digital dataset index..."
+          )
+
+          try:
+
+              index_body, _ = fetch(
+                  INDEX_URL
+              )
+
+              index_links = parse_links(
+                  INDEX_URL,
+                  index_body
+              )
+
+          except Exception as exc:
+
+              print(
+                  "WARNING: Could not download "
+                  "digital dataset index:",
+                  exc
+              )
+
+              index_links = []
+
+          print(
+              "Index links found:",
+              len(index_links)
+          )
+
+          # --------------------------------------------------------
+          # Search for actual NATS-provided AIP hrefs.
           #
-          # The checklist names the dataset with underscores.
-          # The downloadable ICAO AIP archive uses the
-          # "EG AIS DS FULL YYYYMMDD XML.zip" convention.
+          # We never manufacture an archive filename here.
           # --------------------------------------------------------
 
-          aip_archive_names = [
-              f"EG AIS DS FULL {aip_stamp} XML.zip",
-              f"EG AIS DS FULL {aip_stamp} XML.ZIP",
-              f"EG AIP DS FULL {aip_stamp} XML.zip",
-              f"EG AIP DS FULL {aip_stamp} XML.ZIP"
-          ]
+          aip_links = []
 
-          vrp_bases = [
-              DATASET_BASE +
-              "VRP/",
+          seen = set()
 
-              DATASET_BASE +
-              "VRP%20Data/",
+          for url, text in (
+              checklist_links
+              +
+              index_links
+          ):
 
-              DATASET_BASE +
-              "Visual%20Reference%20Points/"
-          ]
+              key = (
+                  url,
+                  text
+              )
 
-          vrp_names = [
-              vrp_filename,
+              if key in seen:
 
-              vrp_filename.lower(),
+                  continue
 
-              f"EG VRP DS AREA1 FULL {vrp_stamp} CSV.zip",
+              seen.add(
+                  key
+              )
 
-              f"EG VRP DS AREA1 FULL {vrp_stamp} CSV.ZIP"
-          ]
+              if looks_like_aip(
+                  url,
+                  text,
+                  aip_stamp
+              ):
+
+                  aip_links.append(
+                      (
+                          url,
+                          text
+                      )
+                  )
+
+          print("")
+          print(
+              "AIP links matching current AIRAC:"
+          )
+
+          for url, text in aip_links:
+
+              print(
+                  "TEXT:",
+                  text
+              )
+
+              print(
+                  "HREF:",
+                  url
+              )
+
+          # --------------------------------------------------------
+          # Follow matching dataset pages and inspect their links.
+          #
+          # This handles the case where the checklist points to a
+          # dataset landing page rather than the archive itself.
+          # --------------------------------------------------------
+
+          expanded_links = []
+
+          for url, text in list(
+              aip_links
+          ):
+
+              parsed = urlparse(
+                  url
+              )
+
+              path = parsed.path.lower()
+
+              if (
+                  path.endswith(
+                      ".html"
+                  )
+                  or
+                  path.endswith(
+                      ".htm"
+                  )
+                  or
+                  path.endswith(
+                      "/"
+                  )
+              ):
+
+                  print("")
+                  print(
+                      "Inspecting linked AIP dataset page:"
+                  )
+
+                  print(
+                      url
+                  )
+
+                  try:
+
+                      body, _ = fetch(
+                          url
+                      )
+
+                      links = parse_links(
+                          url,
+                          body
+                      )
+
+                      for child_url, child_text in links:
+
+                          if looks_like_aip(
+                              child_url,
+                              child_text,
+                              aip_stamp
+                          ):
+
+                              expanded_links.append(
+                                  (
+                                      child_url,
+                                      child_text
+                                  )
+                              )
+
+                  except Exception as exc:
+
+                      print(
+                          "WARNING: Could not inspect:",
+                          exc
+                      )
+
+          aip_links.extend(
+              expanded_links
+          )
+
+          # Deduplicate.
+          unique_aip_links = []
+
+          seen_urls = set()
+
+          for url, text in aip_links:
+
+              if url in seen_urls:
+
+                  continue
+
+              seen_urls.add(
+                  url
+              )
+
+              unique_aip_links.append(
+                  (
+                      url,
+                      text
+                  )
+              )
+
+          aip_links = unique_aip_links
+
+          print("")
+          print(
+              "Final NATS-provided AIP links:"
+          )
+
+          for url, text in aip_links:
+
+              print(
+                  url
+              )
+
+          # --------------------------------------------------------
+          # Search for VRP links in exactly the same way.
+          # --------------------------------------------------------
+
+          vrp_links = []
+
+          seen = set()
+
+          for url, text in (
+              checklist_links
+              +
+              index_links
+          ):
+
+              key = (
+                  url,
+                  text
+              )
+
+              if key in seen:
+
+                  continue
+
+              seen.add(
+                  key
+              )
+
+              if looks_like_vrp(
+                  url,
+                  text,
+                  vrp_stamp
+              ):
+
+                  vrp_links.append(
+                      (
+                          url,
+                          text
+                      )
+                  )
 
           # --------------------------------------------------------
           # Save discovery information.
           # --------------------------------------------------------
-
-          Path(
-              "/tmp/nats-aip-base.txt"
-          ).write_text(
-              ICAO_AIP_BASE,
-              encoding="utf-8"
-          )
 
           Path(
               "/tmp/nats-aip-date.txt"
@@ -363,10 +868,11 @@ jobs:
           )
 
           Path(
-              "/tmp/nats-aip-archive-names.txt"
+              "/tmp/nats-aip-links.txt"
           ).write_text(
               "\n".join(
-                  aip_archive_names
+                  url
+                  for url, _ in aip_links
               ),
               encoding="utf-8"
           )
@@ -388,84 +894,68 @@ jobs:
           )
 
           Path(
-              "/tmp/nats-vrp-bases.txt"
+              "/tmp/nats-vrp-links.txt"
           ).write_text(
               "\n".join(
-                  vrp_bases
+                  url
+                  for url, _ in vrp_links
               ),
               encoding="utf-8"
           )
 
-          Path(
-              "/tmp/nats-vrp-names.txt"
-          ).write_text(
-              "\n".join(
-                  vrp_names
-              ),
-              encoding="utf-8"
-          )
+          # --------------------------------------------------------
+          # AIP discovery must succeed.
+          # --------------------------------------------------------
 
-          print("")
-          print(
-              "=========================================="
-          )
-          print(
-              "NATS DATASET DISCOVERY"
-          )
-          print(
-              "=========================================="
-          )
+          if not aip_links:
 
-          print("")
-          print(
-              "AIP AIRAC:",
-              aip_stamp
-          )
+              print("")
+              print(
+                  "=========================================="
+              )
+              print(
+                  "NATS AIP DISCOVERY FAILED"
+              )
+              print(
+                  "=========================================="
+              )
 
-          print(
-              "AIP checklist filename:",
-              aip_filename
-          )
-
-          print("")
-          print(
-              "VRP AIRAC:",
-              vrp_stamp
-          )
-
-          print(
-              "VRP checklist filename:",
-              vrp_filename
-          )
-
-          print("")
-          print(
-              "NATS ICAO AIP base:"
-          )
-
-          print(
-              ICAO_AIP_BASE
-          )
-
-          print("")
-          print(
-              "AIP archive candidates:"
-          )
-
-          for name in aip_archive_names:
+              print("")
+              print(
+                  "Checklist dataset:"
+              )
 
               print(
-                  name
+                  aip_filename
               )
+
+              print("")
+              print(
+                  "No NATS-provided href matching the "
+                  "current AIP dataset was found."
+              )
+
+              print("")
+              print(
+                  "The workflow will NOT guess a URL."
+              )
+
+              raise SystemExit(
+                  1
+              )
+
+          print("")
+          print(
+              "NATS dataset discovery complete."
+          )
 
           PY
 
       # ============================================================
       # DOWNLOAD NATS AIP
       #
-      # IMPORTANT:
-      # Dataset archive filenames contain spaces.
-      # We URL-encode the filename before curl is called.
+      # Every URL used here came from a NATS HTML href.
+      # No archive filename is invented.
       # ============================================================
 
       - name: Download NATS AIP dataset
@@ -477,43 +967,17 @@ jobs:
           echo "=========================================="
           echo ""
 
-          AIP_BASE=$(
-            cat /tmp/nats-aip-base.txt
-          )
-
           mkdir -p \
             /tmp/nats-aip
 
           FOUND=""
 
-          while IFS= read -r NAME; do
+          while IFS= read -r URL; do
 
-            [ -z "${NAME}" ] && continue
-
-            # URL-encode the filename.
-            ENCODED_NAME=$(
-              python3 -c '
-          import sys
-          from urllib.parse import quote
-          print(
-              quote(
-                  sys.argv[1],
-                  safe=""
-              )
-          )
-              ' "${NAME}"
-            )
-
-            URL="${AIP_BASE}${ENCODED_NAME}"
+            [ -z "${URL}" ] && continue
 
             echo ""
-            echo "Filename:"
-            echo "${NAME}"
-
-            echo "Encoded:"
-            echo "${ENCODED_NAME}"
-
-            echo "Trying:"
+            echo "NATS supplied URL:"
             echo "${URL}"
 
             rm -f \
@@ -529,25 +993,99 @@ jobs:
                 --write-out "%{http_code}" \
                 --retry 2 \
                 --retry-delay 3 \
+                --connect-timeout 20 \
+                --max-time 120 \
                 "${URL}" \
                 || true
             )
 
             echo "HTTP: ${HTTP_CODE}"
 
-            if [ "${HTTP_CODE}" = "200" ]; then
+            if [ "${HTTP_CODE}" != "200" ]; then
 
-              if file \
+              continue
+
+            fi
+
+            echo ""
+            echo "Response type:"
+
+            file \
+              /tmp/nats-aip-download
+
+            # ------------------------------------------------------
+            # Direct XML.
+            # ------------------------------------------------------
+
+            if grep -aqi \
+              "<[^>]*AIXM" \
+              /tmp/nats-aip-download; then
+
+              echo ""
+              echo "SUCCESS: NATS supplied direct AIP XML."
+
+              cp \
                 /tmp/nats-aip-download \
-                | grep -qi \
-                  "Zip archive"; then
+                /tmp/uk-aip.xml
 
-                echo ""
-                echo "SUCCESS: NATS AIP ZIP found."
+              FOUND="${URL}"
+
+              break
+
+            fi
+
+            # ------------------------------------------------------
+            # ZIP archive.
+            # ------------------------------------------------------
+
+            if file \
+              /tmp/nats-aip-download \
+              | grep -qi \
+                "Zip archive"; then
+
+              echo ""
+              echo "SUCCESS: NATS supplied AIP ZIP."
+
+              rm -rf \
+                /tmp/nats-aip
+
+              mkdir -p \
+                /tmp/nats-aip
+
+              cp \
+                /tmp/nats-aip-download \
+                /tmp/nats-aip.zip
+
+              unzip \
+                -o \
+                /tmp/nats-aip.zip \
+                -d /tmp/nats-aip
+
+              echo ""
+              echo "AIP archive contents:"
+
+              find \
+                /tmp/nats-aip \
+                -type f \
+                -print
+
+              AIP_XML=$(
+                find \
+                  /tmp/nats-aip \
+                  -type f \
+                  \( \
+                    -iname 'EG_AIP_DS_FULL_*.xml' \
+                    -o \
+                    -iname 'EG_AIP_DS_FULL_*.XML' \
+                  \) \
+                  | head -n 1
+              )
+
+              if [ -n "${AIP_XML}" ]; then
 
                 cp \
-                  /tmp/nats-aip-download \
-                  /tmp/nats-aip.zip
+                  "${AIP_XML}" \
+                  /tmp/uk-aip.xml
 
                 FOUND="${URL}"
 
@@ -556,15 +1094,11 @@ jobs:
               fi
 
               echo ""
-              echo "HTTP 200 received, but response was not"
-              echo "recognised as a ZIP."
-
-              file \
-                /tmp/nats-aip-download
+              echo "ZIP did not contain the expected FULL AIP XML."
 
             fi
 
-          done < /tmp/nats-aip-archive-names.txt
+          done < /tmp/nats-aip-links.txt
 
           if [ -z "${FOUND}" ]; then
 
@@ -574,12 +1108,15 @@ jobs:
             echo "=========================================="
             echo ""
 
-            echo "The NATS checklist is valid:"
+            echo "NATS checklist dataset:"
             cat \
               /tmp/nats-aip-filename.txt
 
             echo ""
-            echo "No usable AIP archive was downloaded."
+            echo "NATS-provided links tested:"
+
+            cat \
+              /tmp/nats-aip-links.txt
 
             echo ""
             echo "No aviation data has been changed."
@@ -589,65 +1126,35 @@ jobs:
           fi
 
           echo ""
-          echo "Selected NATS AIP archive:"
+          echo "=========================================="
+          echo "NATS AIP DOWNLOAD SUCCESSFUL"
+          echo "=========================================="
+          echo ""
+
+          echo "Source:"
           echo "${FOUND}"
 
           echo ""
-          echo "Extracting archive..."
-
-          unzip \
-            -o \
-            /tmp/nats-aip.zip \
-            -d /tmp/nats-aip
-
-          echo ""
-          echo "NATS AIP archive contents:"
-          find \
-            /tmp/nats-aip \
-            -type f \
-            -print
-
-          # --------------------------------------------------------
-          # Locate FULL AIP XML.
-          # --------------------------------------------------------
-
-          AIP_XML=$(
-            find \
-              /tmp/nats-aip \
-              -type f \
-              \( \
-                -iname 'EG_AIP_DS_FULL_*.xml' \
-                -o \
-                -iname 'EG_AIP_DS_FULL_*.XML' \
-              \) \
-              | head -n 1
-          )
-
-          if [ -z "${AIP_XML}" ]; then
-
-            echo ""
-            echo "ERROR: AIP archive contained no FULL XML."
-
-            find \
-              /tmp/nats-aip \
-              -type f \
-              -print
-
-            exit 1
-
-          fi
-
-          cp \
-            "${AIP_XML}" \
-            /tmp/uk-aip.xml
-
-          echo ""
-          echo "Selected AIP XML:"
-          echo "${AIP_XML}"
-
-          echo ""
+          echo "AIP XML:"
           ls -lh \
             /tmp/uk-aip.xml
+
+          echo ""
+          echo "XML validation:"
+
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          path = "/tmp/uk-aip.xml"
+
+          ET.parse(
+              path
+          )
+
+          print(
+              "AIP XML parses successfully."
+          )
+          PY
 
       # ============================================================
       # DOWNLOAD NATS VRP
@@ -667,148 +1174,140 @@ jobs:
 
           FOUND=""
 
-          while IFS= read -r BASE; do
+          while IFS= read -r URL; do
 
-            [ -z "${BASE}" ] && continue
+            [ -z "${URL}" ] && continue
 
-            while IFS= read -r NAME; do
+            echo ""
+            echo "NATS supplied URL:"
+            echo "${URL}"
 
-              [ -z "${NAME}" ] && continue
+            rm -f \
+              /tmp/nats-vrp-download
 
-              # URL-encode filename.
-              ENCODED_NAME=$(
-                python3 -c '
-          import sys
-          from urllib.parse import quote
-          print(
-              quote(
-                  sys.argv[1],
-                  safe=""
+            HTTP_CODE=$(
+              curl \
+                --location \
+                --silent \
+                --show-error \
+                --output \
+                /tmp/nats-vrp-download \
+                --write-out "%{http_code}" \
+                --retry 2 \
+                --retry-delay 3 \
+                --connect-timeout 20 \
+                --max-time 120 \
+                "${URL}" \
+                || true
+            )
+
+            echo "HTTP: ${HTTP_CODE}"
+
+            if [ "${HTTP_CODE}" != "200" ]; then
+
+              continue
+
+            fi
+
+            file \
+              /tmp/nats-vrp-download
+
+            # ------------------------------------------------------
+            # ZIP.
+            # ------------------------------------------------------
+
+            if file \
+              /tmp/nats-vrp-download \
+              | grep -qi \
+                "Zip archive"; then
+
+              rm -rf \
+                /tmp/nats-vrp
+
+              mkdir -p \
+                /tmp/nats-vrp
+
+              unzip \
+                -o \
+                /tmp/nats-vrp-download \
+                -d /tmp/nats-vrp
+
+              VRP_CSV=$(
+                find \
+                  /tmp/nats-vrp \
+                  -type f \
+                  \( \
+                    -iname '*.csv' \
+                    -o \
+                    -iname '*.CSV' \
+                  \) \
+                  | head -n 1
               )
-          )
-                ' "${NAME}"
-              )
 
-              URL="${BASE}${ENCODED_NAME}"
+              if [ -n "${VRP_CSV}" ]; then
 
-              echo ""
-              echo "Filename:"
-              echo "${NAME}"
+                cp \
+                  "${VRP_CSV}" \
+                  /tmp/uk-vrps.csv
 
-              echo "Trying:"
-              echo "${URL}"
+                FOUND="${URL}"
 
-              rm -f \
-                /tmp/nats-vrp-download
-
-              HTTP_CODE=$(
-                curl \
-                  --location \
-                  --silent \
-                  --show-error \
-                  --output \
-                  /tmp/nats-vrp-download \
-                  --write-out "%{http_code}" \
-                  --retry 2 \
-                  --retry-delay 3 \
-                  "${URL}" \
-                  || true
-              )
-
-              echo "HTTP: ${HTTP_CODE}"
-
-              if [ "${HTTP_CODE}" = "200" ]; then
-
-                if file \
-                  /tmp/nats-vrp-download \
-                  | grep -qi \
-                    "Zip archive"; then
-
-                  cp \
-                    /tmp/nats-vrp-download \
-                    /tmp/nats-vrp.zip
-
-                  FOUND="${URL}"
-
-                  break 2
-
-                fi
-
-                # Direct CSV.
-                if file \
-                  /tmp/nats-vrp-download \
-                  | grep -Eqi \
-                    "text|CSV|ASCII"; then
-
-                  cp \
-                    /tmp/nats-vrp-download \
-                    /tmp/uk-vrps.csv
-
-                  FOUND="${URL}"
-
-                  break 2
-
-                fi
+                break
 
               fi
 
-            done < /tmp/nats-vrp-names.txt
+            fi
 
-          done < /tmp/nats-vrp-bases.txt
+            # ------------------------------------------------------
+            # Direct CSV.
+            # ------------------------------------------------------
+
+            if head \
+              -n 5 \
+              /tmp/nats-vrp-download \
+              | grep -qi \
+                "latitude\|longitude\|longitude"; then
+
+              cp \
+                /tmp/nats-vrp-download \
+                /tmp/uk-vrps.csv
+
+              FOUND="${URL}"
+
+              break
+
+            fi
+
+          done < /tmp/nats-vrp-links.txt
 
           if [ -z "${FOUND}" ]; then
 
             echo ""
-            echo "ERROR: Could not locate current NATS VRP dataset."
+            echo "=========================================="
+            echo "NATS VRP DOWNLOAD FAILED"
+            echo "=========================================="
+            echo ""
+
+            echo "VRP checklist dataset:"
+            cat \
+              /tmp/nats-vrp-filename.txt
+
+            echo ""
+            echo "NATS-provided VRP links:"
+
+            cat \
+              /tmp/nats-vrp-links.txt
 
             exit 1
 
           fi
 
-          echo ""
-          echo "Selected VRP source:"
-          echo "${FOUND}"
-
-          if [ -f /tmp/nats-vrp.zip ]; then
-
-            unzip \
-              -o \
-              /tmp/nats-vrp.zip \
-              -d /tmp/nats-vrp
-
-            VRP_CSV=$(
-              find \
-                /tmp/nats-vrp \
-                -type f \
-                \( \
-                  -iname '*.csv' \
-                  -o \
-                  -iname '*.CSV' \
-                \) \
-                | head -n 1
-            )
-
-            if [ -z "${VRP_CSV}" ]; then
-
-              echo "ERROR: VRP ZIP contained no CSV."
-
-              find \
-                /tmp/nats-vrp \
-                -type f \
-                -print
-
-              exit 1
-
-            fi
-
-            cp \
-              "${VRP_CSV}" \
-              /tmp/uk-vrps.csv
-
-          fi
-
           test -s \
             /tmp/uk-vrps.csv
+
+          echo ""
+          echo "VRP source:"
+          echo "${FOUND}"
 
           echo ""
           echo "VRP CSV:"
@@ -818,7 +1317,7 @@ jobs:
       # ============================================================
       # CONVERT NATS AIXM AIRSPACE
       #
-      # Only retain:
+      # Retain ONLY:
       #
       # A-G
       # PA
@@ -829,7 +1328,7 @@ jobs:
       # RMZ
       # TMZ
       #
-      # NOTAM airspace is deliberately not included yet.
+      # NOTAM airspace is deliberately excluded for now.
       # ============================================================
 
       - name: Convert NATS AIXM airspace to GeoJSON
@@ -859,9 +1358,15 @@ jobs:
           ).strip()
 
           print("")
-          print("==========================================")
-          print("PARSING NATS AIXM")
-          print("==========================================")
+          print(
+              "=========================================="
+          )
+          print(
+              "PARSING NATS AIXM"
+          )
+          print(
+              "=========================================="
+          )
 
           print(
               "AIRAC:",
@@ -898,12 +1403,14 @@ jobs:
 
                   if local(key) in {
                       "id",
-                      "gml:id"
+                      "href"
                   }:
 
                       if value:
 
-                          index[value] = element
+                          index[
+                              value.lstrip("#")
+                          ] = element
 
           print(
               "Indexed XML objects:",
@@ -922,8 +1429,7 @@ jobs:
                   for key, value in current.attrib.items():
 
                       if local(key) in {
-                          "href",
-                          "xlink:href"
+                          "href"
                       }:
 
                           href = value
@@ -1122,6 +1628,8 @@ jobs:
               airspace
           ):
 
+              polygons = []
+
               candidates = []
 
               for element in airspace.iter():
@@ -1135,8 +1643,6 @@ jobs:
                       candidates.append(
                           resolved
                       )
-
-              unique = []
 
               seen = set()
 
@@ -1154,15 +1660,7 @@ jobs:
                       marker
                   )
 
-                  unique.append(
-                      element
-                  )
-
-              polygons = []
-
-              for surface in unique:
-
-                  for polygon in surface.iter():
+                  for polygon in element.iter():
 
                       if local(
                           polygon.tag
@@ -1179,17 +1677,19 @@ jobs:
 
                           if local(
                               ring.tag
-                          ) == "LinearRing":
+                          ) != "LinearRing":
 
-                              points = ring_from(
-                                  ring
+                              continue
+
+                          points = ring_from(
+                              ring
+                          )
+
+                          if points:
+
+                              rings.append(
+                                  points
                               )
-
-                              if points:
-
-                                  rings.append(
-                                      points
-                                  )
 
                       if rings:
 
@@ -1254,7 +1754,7 @@ jobs:
               )
 
               # ----------------------------------------------------
-              # Special AviMap categories first.
+              # Special categories first.
               # ----------------------------------------------------
 
               if (
@@ -1313,6 +1813,10 @@ jobs:
 
                   return "ATZ"
 
+              # ----------------------------------------------------
+              # P / R / D.
+              # ----------------------------------------------------
+
               if re.search(
                   r"\bPROHIBITED\b",
                   compact
@@ -1335,7 +1839,7 @@ jobs:
                   return "DA"
 
               # ----------------------------------------------------
-              # Class A-G.
+              # A-G.
               # ----------------------------------------------------
 
               for letter in (
@@ -1485,9 +1989,7 @@ jobs:
                                   category,
 
                               "source":
-                                  (
-                                      "NATS UK ICAO AIP Dataset"
-                                  ),
+                                  "NATS UK ICAO AIP Dataset",
 
                               "airac":
                                   AIRAC
@@ -1650,7 +2152,9 @@ jobs:
               rows[0].keys()
           )
 
-          def norm(value):
+          def norm(
+              value
+          ):
 
               return re.sub(
                   r"[^a-z0-9]",
@@ -1936,7 +2440,7 @@ jobs:
           PY
 
       # ============================================================
-      # VALIDATE
+      # VALIDATE GENERATED DATA
       # ============================================================
 
       - name: Validate generated NATS data
@@ -1985,7 +2489,7 @@ jobs:
           echo "Validation successful."
 
       # ============================================================
-      # INSTALL
+      # INSTALL VALIDATED AVIATION DATA
       # ============================================================
 
       - name: Install validated aviation data
@@ -2004,7 +2508,7 @@ jobs:
             data/uk-reporting-points.geojson
 
       # ============================================================
-      # COMMIT
+      # COMMIT UPDATED DATA
       # ============================================================
 
       - name: Commit updated NATS aviation data
