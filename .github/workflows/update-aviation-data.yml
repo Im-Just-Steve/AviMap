@@ -14,19 +14,11 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
       - name: Checkout repository
         uses: actions/checkout@v5
 
-
       # ============================================================
-      # FIND CURRENT NATS DATASETS FROM THE DATASET CHECKLIST
-      #
-      # The NATS Dataset Checklist is the source of truth for the
-      # current filenames and effective dates.
+      # FIND CURRENT NATS DATASETS
       # ============================================================
 
       - name: Find current NATS AIP and VRP datasets
@@ -40,36 +32,17 @@ jobs:
           python3 <<'PY'
           import html
           import re
+          import urllib.request
           from datetime import datetime, timezone
           from pathlib import Path
           from urllib.parse import urljoin, unquote
 
-          CHECKLIST_BASE = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/opencms/en/Publications/"
-              "digital-datasets/Checklists/"
-          )
+          USER_AGENT = "AviMap-NATS-Data-Updater/1.0"
 
-          INDEX_URL = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/opencms/en/Publications/"
-              "digital-datasets/index.html"
-          )
-
-          EXPORT_BASE = (
-              "https://nats-uk.ead-it.com/"
-              "cms-nats/export/sites/default/en/"
-              "Publications/digital-datasets/"
-          )
-
-          import urllib.request
-
-          def download(url):
+          def fetch(url):
               request = urllib.request.Request(
                   url,
-                  headers={
-                      "User-Agent": "AviMap-NATS-Data-Updater/1.0"
-                  }
+                  headers={"User-Agent": USER_AGENT}
               )
 
               with urllib.request.urlopen(
@@ -81,51 +54,64 @@ jobs:
                       errors="replace"
                   )
 
-          # --------------------------------------------------------
-          # Work out which checklist is current.
-          # --------------------------------------------------------
+          INDEX_URL = (
+              "https://nats-uk.ead-it.com/"
+              "cms-nats/opencms/en/Publications/"
+              "digital-datasets/index.html"
+          )
+
+          CHECKLIST_BASE = (
+              "https://nats-uk.ead-it.com/"
+              "cms-nats/opencms/en/Publications/"
+              "digital-datasets/Checklists/"
+          )
+
+          EXPORT_BASE = (
+              "https://nats-uk.ead-it.com/"
+              "cms-nats/export/sites/default/en/"
+              "Publications/digital-datasets/"
+          )
+
+          today = datetime.now(
+              timezone.utc
+          ).date()
 
           print("")
           print("Downloading NATS digital datasets index...")
 
-          index = download(INDEX_URL)
-          index = html.unescape(index)
+          index = html.unescape(
+              fetch(INDEX_URL)
+          )
 
-          checklist_links = re.findall(
-              r'href\s*=\s*["\']([^"\']*Dataset_Checklist_[^"\']+\.HTML[^"\']*)["\']',
+          # Find every Dataset_Checklist_YYYY_MM_DD.HTML link.
+          checklist_matches = re.findall(
+              r'Dataset_Checklist_(\d{4})_(\d{2})_(\d{2})\.HTML',
               index,
               flags=re.I
           )
 
           checklist_candidates = []
 
-          for href in checklist_links:
-              url = urljoin(
-                  INDEX_URL,
-                  unquote(href)
-              )
-
-              match = re.search(
-                  r'Dataset_Checklist_(\d{4})_(\d{2})_(\d{2})\.HTML',
-                  url,
-                  flags=re.I
-              )
-
-              if not match:
+          for year, month, day in checklist_matches:
+              try:
+                  date = datetime(
+                      int(year),
+                      int(month),
+                      int(day)
+                  ).date()
+              except ValueError:
                   continue
 
-              date = datetime(
-                  int(match.group(1)),
-                  int(match.group(2)),
-                  int(match.group(3))
-              ).date()
+              url = (
+                  CHECKLIST_BASE
+                  + f"Dataset_Checklist_{year}_{month}_{day}.HTML"
+              )
 
               checklist_candidates.append(
                   (date, url)
               )
 
-          # Fallback to the currently published checklist known to
-          # be linked by the NATS site if the index structure changes.
+          # Fallback to the currently published checklist.
           if not checklist_candidates:
               checklist_candidates.append(
                   (
@@ -139,38 +125,30 @@ jobs:
                   )
               )
 
-          today = datetime.now(
-              timezone.utc
-          ).date()
-
-          eligible = [
+          eligible_checklists = [
               item
               for item in checklist_candidates
               if item[0] <= today
           ]
 
-          if not eligible:
+          if not eligible_checklists:
               raise SystemExit(
-                  "ERROR: Could not find an effective NATS Dataset Checklist."
+                  "ERROR: No effective NATS Dataset Checklist found."
               )
 
           checklist_date, checklist_url = max(
-              eligible,
+              eligible_checklists,
               key=lambda item: item[0]
           )
 
           print("")
-          print("NATS Dataset Checklist:")
-          print(checklist_date)
-          print(checklist_url)
+          print("Selected NATS checklist:")
+          print(f"  Date: {checklist_date}")
+          print(f"  URL : {checklist_url}")
           print("")
 
-          checklist = download(
-              checklist_url
-          )
-
           checklist = html.unescape(
-              checklist
+              fetch(checklist_url)
           )
 
           Path(
@@ -181,12 +159,56 @@ jobs:
           )
 
           # --------------------------------------------------------
-          # Find filenames in the checklist.
+          # Find dataset filenames in the checklist.
           # --------------------------------------------------------
 
-          def extract_date(filename):
+          def find_names(pattern):
+              return sorted(
+                  set(
+                      re.findall(
+                          pattern,
+                          checklist,
+                          flags=re.I
+                      )
+                  )
+              )
+
+          aip_xml_names = find_names(
+              r'EG_AIP_DS_FULL_\d{8}\.XML'
+          )
+
+          aip_kml_names = find_names(
+              r'EG_AIP_DS_FULL_\d{8}\.KML'
+          )
+
+          vrp_csv_names = find_names(
+              r'EG_VRP_DS_AREA1_FULL_\d{8}\.CSV'
+          )
+
+          print("==========================================")
+          print("NATS CHECKLIST DATASETS")
+          print("==========================================")
+          print("")
+
+          print("AIP XML candidates:")
+          for name in aip_xml_names:
+              print(f"  {name}")
+
+          print("")
+          print("AIP KML candidates:")
+          for name in aip_kml_names:
+              print(f"  {name}")
+
+          print("")
+          print("VRP CSV candidates:")
+          for name in vrp_csv_names:
+              print(f"  {name}")
+
+          print("")
+
+          def filename_date(filename):
               match = re.search(
-                  r'_(\d{8})(?:\.|_)',
+                  r'_(\d{8})\.',
                   filename
               )
 
@@ -201,70 +223,20 @@ jobs:
               except ValueError:
                   return None
 
-          def extract_filename_candidates(pattern):
-              names = set(
-                  re.findall(
-                      pattern,
-                      checklist,
-                      flags=re.I
-                  )
-              )
-
-              return sorted(
-                  names
-              )
-
-          aip_xml_names = extract_filename_candidates(
-              r'EG_AIP_DS_FULL_\d{8}\.XML'
-          )
-
-          aip_kml_names = extract_filename_candidates(
-              r'EG_AIP_DS_FULL_\d{8}\.KML'
-          )
-
-          vrp_names = extract_filename_candidates(
-              r'EG_VRP_DS_AREA1_FULL_\d{8}\.(?:CSV|XLSX)'
-          )
-
-          print("==========================================")
-          print("NATS CHECKLIST DATASETS")
-          print("==========================================")
-          print("")
-
-          print("AIP XML:")
-          for name in aip_xml_names:
-              print(f"  {name}")
-
-          print("")
-          print("AIP KML:")
-          for name in aip_kml_names:
-              print(f"  {name}")
-
-          print("")
-          print("VRP:")
-          for name in vrp_names:
-              print(f"  {name}")
-
-          print("")
-
-          def select_latest(names, label):
+          def select_latest(names, description):
               candidates = []
 
               for name in names:
-                  date = extract_date(name)
+                  date = filename_date(name)
 
-                  if date is None:
-                      continue
-
-                  if date <= today:
+                  if date is not None and date <= today:
                       candidates.append(
                           (date, name)
                       )
 
               if not candidates:
                   raise SystemExit(
-                      f"ERROR: No effective {label} dataset found in "
-                      "the NATS Dataset Checklist."
+                      f"ERROR: No current {description} dataset found."
                   )
 
               return max(
@@ -283,63 +255,66 @@ jobs:
           )
 
           vrp_date, vrp_name = select_latest(
-              vrp_names,
-              "VRP"
+              vrp_csv_names,
+              "VRP CSV"
           )
 
           if aip_xml_date != aip_kml_date:
               raise SystemExit(
-                  "ERROR: NATS AIP XML and KML effective dates do not "
-                  f"match: {aip_xml_date} vs {aip_kml_date}"
+                  "ERROR: AIP XML and KML are different AIRAC dates: "
+                  f"{aip_xml_date} / {aip_kml_date}"
               )
 
           # --------------------------------------------------------
-          # Find the actual href associated with each filename.
+          # Locate URLs in the checklist.
           #
-          # If NATS displays the filename as plain table text rather
-          # than a direct anchor, use the NATS export directory as
-          # the fallback download location.
+          # NATS sometimes puts the filename directly in href and
+          # sometimes places the filename in a table beside the href.
+          # We inspect the surrounding HTML.
           # --------------------------------------------------------
 
-          def find_href_for_filename(filename):
-              escaped = re.escape(
-                  filename
-              )
+          def find_url(filename):
+              escaped = re.escape(filename)
 
-              # Case 1: filename is inside an href.
+              # Direct href containing filename.
               match = re.search(
                   r'href\s*=\s*["\']([^"\']*'
-                  + escaped +
-                  r'[^"\']*)["\']',
+                  + escaped
+                  + r'[^"\']*)["\']',
                   checklist,
                   flags=re.I
               )
 
               if match:
-                  return urljoin(
-                      checklist_url,
-                      html.unescape(
-                          unquote(
-                              match.group(1)
-                          )
+                  href = html.unescape(
+                      unquote(
+                          match.group(1)
                       )
                   )
 
-              # Case 2: filename appears near an href in the same
-              # table cell/HTML region.
-              for match in re.finditer(
-                  escaped,
-                  checklist,
-                  flags=re.I
-              ):
+                  return urljoin(
+                      checklist_url,
+                      href
+                  )
+
+              # Look around each occurrence of the filename.
+              occurrences = list(
+                  re.finditer(
+                      escaped,
+                      checklist,
+                      flags=re.I
+                  )
+              )
+
+              for occurrence in occurrences:
                   start = max(
                       0,
-                      match.start() - 2500
+                      occurrence.start() - 4000
                   )
 
                   end = min(
                       len(checklist),
-                      match.end() + 2500
+                      occurrence.end() + 4000
                   )
 
                   nearby = checklist[
@@ -353,130 +328,115 @@ jobs:
                   )
 
                   for href in hrefs:
-                      url = urljoin(
-                          checklist_url,
-                          html.unescape(
-                              unquote(
-                                  href
-                              )
+                      href = html.unescape(
+                          unquote(
+                              href
                           )
                       )
 
-                      if filename.lower() in url.lower():
-                          return url
-
-                  # If exactly one obvious digital-dataset download
-                  # link is nearby, use it.
-                  for href in hrefs:
                       url = urljoin(
                           checklist_url,
-                          html.unescape(
-                              unquote(
-                                  href
-                              )
-                          )
+                          href
+                      )
 
-                      if (
-                          "/cms-nats/export/" in url
-                          and
-                          filename.split(".")[0].lower()
-                          in url.lower()
-                      ):
+                      if "/cms-nats/export/" in url:
                           return url
 
-              # Case 3: standard NATS export directory fallback.
-              return (
-                  EXPORT_BASE
-                  + filename
-              )
+              return None
 
-          aip_xml_url = find_href_for_filename(
+          aip_xml_url = find_url(
               aip_xml_name
           )
 
-          aip_kml_url = find_href_for_filename(
+          aip_kml_url = find_url(
               aip_kml_name
           )
 
-          # The VRP checklist gives the CSV and XLSX filenames.
-          # Prefer CSV because that is what AviMap consumes.
-          vrp_csv_names = [
-              name
-              for name in vrp_names
-              if name.upper().endswith(
-                  ".CSV"
-              )
-          ]
-
-          if not vrp_csv_names:
-              raise SystemExit(
-                  "ERROR: NATS checklist contains no VRP CSV."
-              )
-
-          vrp_csv_date, vrp_csv_name = select_latest(
-              vrp_csv_names,
-              "VRP CSV"
+          vrp_url = find_url(
+              vrp_name
           )
 
-          vrp_url = find_href_for_filename(
-              vrp_csv_name
-          )
+          # --------------------------------------------------------
+          # Fallback to the standard NATS export locations if the
+          # checklist does not expose the href.
+          # --------------------------------------------------------
+
+          if aip_xml_url is None:
+              aip_xml_url = (
+                  EXPORT_BASE
+                  + "AIP/"
+                  + aip_xml_name
+              )
+
+          if aip_kml_url is None:
+              aip_kml_url = (
+                  EXPORT_BASE
+                  + "AIP/"
+                  + aip_kml_name
+              )
+
+          if vrp_url is None:
+              vrp_url = (
+                  EXPORT_BASE
+                  + "VRP/"
+                  + vrp_name
+              )
 
           print("==========================================")
           print("SELECTED NATS DATASETS")
           print("==========================================")
           print("")
-          print(f"AIP effective date : {aip_xml_date}")
-          print(f"AIP XML filename   : {aip_xml_name}")
-          print(f"AIP XML URL        : {aip_xml_url}")
+          print(f"AIP AIRAC DATE : {aip_xml_date}")
+          print(f"AIP XML        : {aip_xml_name}")
+          print(f"AIP XML URL    : {aip_xml_url}")
           print("")
-          print(f"AIP KML filename   : {aip_kml_name}")
-          print(f"AIP KML URL        : {aip_kml_url}")
+          print(f"AIP KML        : {aip_kml_name}")
+          print(f"AIP KML URL    : {aip_kml_url}")
           print("")
-          print(f"VRP effective date : {vrp_csv_date}")
-          print(f"VRP CSV filename   : {vrp_csv_name}")
-          print(f"VRP CSV URL        : {vrp_url}")
+          print(f"VRP DATE       : {vrp_date}")
+          print(f"VRP CSV        : {vrp_name}")
+          print(f"VRP CSV URL    : {vrp_url}")
           print("")
 
-          open(
-              "/tmp/nats-aip-xml-url.txt",
-              "w"
-          ).write(
-              aip_xml_url
+          Path(
+              "/tmp/nats-aip-xml-url.txt"
+          ).write_text(
+              aip_xml_url,
+              encoding="utf-8"
           )
 
-          open(
-              "/tmp/nats-aip-kml-url.txt",
-              "w"
-          ).write(
-              aip_kml_url
+          Path(
+              "/tmp/nats-aip-kml-url.txt"
+          ).write_text(
+              aip_kml_url,
+              encoding="utf-8"
           )
 
-          open(
-              "/tmp/nats-vrp-url.txt",
-              "w"
-          ).write(
-              vrp_url
+          Path(
+              "/tmp/nats-vrp-url.txt"
+          ).write_text(
+              vrp_url,
+              encoding="utf-8"
           )
 
-          open(
-              "/tmp/nats-airac-date.txt",
-              "w"
-          ).write(
-              str(aip_xml_date)
+          Path(
+              "/tmp/nats-airac-date.txt"
+          ).write_text(
+              str(aip_xml_date),
+              encoding="utf-8"
           )
 
-          open(
-              "/tmp/nats-vrp-date.txt",
-              "w"
-          ).write(
-              str(vrp_csv_date)
+          Path(
+              "/tmp/nats-vrp-date.txt"
+          ).write_text(
+              str(vrp_date),
+              encoding="utf-8"
           )
           PY
 
 
       # ============================================================
-      # DOWNLOAD NATS AIP XML + KML
+      # DOWNLOAD AIP
       # ============================================================
 
       - name: Download NATS UK ICAO AIP dataset
@@ -489,11 +449,14 @@ jobs:
           AIP_KML_URL=$(cat /tmp/nats-aip-kml-url.txt)
 
           echo "=========================================="
-          echo "Downloading NATS UK ICAO AIP dataset"
+          echo "Downloading NATS AIP"
           echo "=========================================="
           echo ""
-          echo "AIXM XML:"
+          echo "XML:"
           echo "${AIP_XML_URL}"
+          echo ""
+          echo "KML:"
+          echo "${AIP_KML_URL}"
           echo ""
 
           curl \
@@ -505,10 +468,6 @@ jobs:
             -L \
             "${AIP_XML_URL}" \
             -o /tmp/nats/aip.xml
-
-          echo "KML:"
-          echo "${AIP_KML_URL}"
-          echo ""
 
           curl \
             --fail \
@@ -524,12 +483,12 @@ jobs:
           test -s /tmp/nats/aip.kml
 
           echo ""
-          echo "Downloaded files:"
+          echo "Downloaded AIP files:"
           ls -lh /tmp/nats/
 
 
       # ============================================================
-      # DOWNLOAD NATS VRP CSV
+      # DOWNLOAD VRP
       # ============================================================
 
       - name: Download NATS VRP dataset
@@ -557,13 +516,12 @@ jobs:
 
           test -s /tmp/nats/vrp-download
 
-          echo "Downloaded file:"
-          file /tmp/nats/vrp-download
-          ls -lh /tmp/nats/vrp-download
-
           mkdir -p /tmp/nats/vrp-extract
 
-          if unzip -t /tmp/nats/vrp-download >/dev/null 2>&1; then
+          if unzip -t \
+            /tmp/nats/vrp-download \
+            >/dev/null 2>&1
+          then
 
             echo "VRP download is a ZIP archive."
 
@@ -572,14 +530,16 @@ jobs:
               /tmp/nats/vrp-download \
               -d /tmp/nats/vrp-extract
 
-            VRP_CSV=$(find \
-              /tmp/nats/vrp-extract \
-              -type f \
-              \( -iname "*.csv" -o -iname "*.CSV" \) \
-              | head -n 1 || true)
+            VRP_CSV=$(
+              find \
+                /tmp/nats/vrp-extract \
+                -type f \
+                -iname "*.csv" \
+                | head -n 1 || true
+            )
 
             if [ -z "${VRP_CSV}" ]; then
-              echo "ERROR: No CSV found in NATS VRP ZIP."
+              echo "ERROR: No CSV found in VRP ZIP."
               find \
                 /tmp/nats/vrp-extract \
                 -type f \
@@ -593,11 +553,12 @@ jobs:
 
           else
 
-            echo "VRP download is not a ZIP; checking whether it is a CSV."
+            echo "VRP download is not a ZIP."
 
             if head -n 1 \
               /tmp/nats/vrp-download \
-              | grep -qi "latitude"; then
+              | grep -qi "latitude"
+            then
 
               cp \
                 /tmp/nats/vrp-download \
@@ -605,7 +566,7 @@ jobs:
 
             else
 
-              echo "ERROR: NATS VRP download is neither a ZIP nor a CSV."
+              echo "ERROR: VRP download is neither ZIP nor CSV."
               exit 1
 
             fi
@@ -615,13 +576,13 @@ jobs:
           test -s /tmp/nats/vrps.csv
 
           echo ""
-          echo "Selected VRP CSV:"
+          echo "VRP CSV:"
           wc -l /tmp/nats/vrps.csv
           ls -lh /tmp/nats/vrps.csv
 
 
       # ============================================================
-      # CONVERT NATS AIP KML AIRSPACE TO GEOJSON
+      # CONVERT AIRSPACE KML TO GEOJSON
       # ============================================================
 
       - name: Convert NATS airspace to GeoJSON
@@ -648,35 +609,20 @@ jobs:
                   1
               )[-1].lower()
 
-          def child_text(element, wanted):
-              for child in element.iter():
-                  if local(child.tag) == wanted.lower():
-                      text = "".join(
-                          child.itertext()
-                      ).strip()
-
-                      if text:
-                          return text
-
-              return ""
-
-          def all_text(element):
+          def text(element):
               return " ".join(
-                  text.strip()
-                  for text in element.itertext()
-                  if text and text.strip()
+                  part.strip()
+                  for part in element.itertext()
+                  if part.strip()
               )
 
-          def parse_coordinates(text):
-              coords = []
+          def parse_coordinates(value):
+              result = []
 
               for token in re.split(
                   r"\s+",
-                  text.strip()
+                  value.strip()
               ):
-                  if not token:
-                      continue
-
                   parts = token.split(",")
 
                   if len(parts) < 2:
@@ -693,77 +639,119 @@ jobs:
                       and
                       -90 <= lat <= 90
                   ):
-                      coords.append([
+                      result.append([
                           lon,
                           lat
                       ])
 
-              return coords
+              return result
 
-          def classify(text):
-              t = text.upper()
+          def classify(value):
+              value = value.upper()
 
               if re.search(
                   r"\b(PROHIBITED|RESTRICTED|DANGER)\b",
-                  t
+                  value
               ):
                   return "PRD"
 
               if re.search(
                   r"\bATZ\b",
-                  t
+                  value
               ):
                   return "ATZ"
 
               if re.search(
                   r"\bTMZ\b",
-                  t
+                  value
               ):
                   return "TMZ"
 
               if re.search(
                   r"\bMATZ\b",
-                  t
+                  value
               ):
                   return "MATZ"
 
               if re.search(
                   r"\bRMZ\b",
-                  t
+                  value
               ):
                   return "RMZ"
 
               if re.search(
                   r"\bCLASS\s*A\b",
-                  t
+                  value
               ):
                   return "CLASS_A"
 
               if re.search(
                   r"\bCLASS\s*[BCD]\b",
-                  t
+                  value
               ):
                   return "CONTROLLED"
 
               if re.search(
                   r"\b(CTA|CTR|TMA|CTZ|CONTROLLED)\b",
-                  t
+                  value
               ):
                   return "CONTROLLED"
 
               return "OTHER"
 
-          def polygon_geometry(polygon):
+          features = []
+
+          for placemark in root.iter():
+
+              if local(
+                  placemark.tag
+              ) != "placemark":
+                  continue
+
+              name = ""
+
+              description = ""
+
+              for child in placemark.iter():
+
+                  tag = local(
+                      child.tag
+                  )
+
+                  if tag == "name" and not name:
+                      name = text(child)
+
+                  if tag == "description" and not description:
+                      description = text(child)
+
+              searchable = text(
+                  placemark
+              )
+
+              category = classify(
+                  searchable
+              )
+
+              if category == "OTHER":
+                  if not re.search(
+                      r"\b(AIRSPACE|CLASS\s*[A-G]|ATZ|TMZ|MATZ|RMZ|"
+                      r"CTA|CTR|TMA|CTZ|PROHIBITED|RESTRICTED|DANGER)\b",
+                      searchable,
+                      flags=re.I
+                  ):
+                      continue
+
               rings = []
 
-              for child in polygon.iter():
-                  if local(child.tag) != "coordinates":
+              for element in placemark.iter():
+
+                  if local(
+                      element.tag
+                  ) != "coordinates":
                       continue
 
                   coords = parse_coordinates(
-                      "".join(
-                          child.itertext()
-                      )
+                      text(element)
                   )
 
                   if len(coords) >= 3:
@@ -778,86 +766,12 @@ jobs:
                       )
 
               if not rings:
-                  return None
+                  continue
 
-              return {
+              geometry = {
                   "type": "Polygon",
                   "coordinates": rings
               }
-
-          features = []
-
-          for placemark in root.iter():
-
-              if local(
-                  placemark.tag
-              ) != "placemark":
-                  continue
-
-              name = child_text(
-                  placemark,
-                  "name"
-              )
-
-              description = child_text(
-                  placemark,
-                  "description"
-              )
-
-              searchable = " ".join([
-                  name,
-                  description,
-                  all_text(placemark)
-              ])
-
-              geometries = []
-
-              for polygon in placemark.iter():
-
-                  if local(
-                      polygon.tag
-                  ) != "polygon":
-                      continue
-
-                  geometry = polygon_geometry(
-                      polygon
-                  )
-
-                  if geometry:
-                      geometries.append(
-                          geometry
-                      )
-
-              if not geometries:
-                  continue
-
-              category = classify(
-                  searchable
-              )
-
-              if category == "OTHER":
-
-                  if not re.search(
-                      r"\b(AIRSPACE|CLASS\s*[A-G]|ATZ|TMZ|MATZ|RMZ|"
-                      r"CTA|CTR|TMA|CTZ|PROHIBITED|RESTRICTED|DANGER)\b",
-                      searchable,
-                      flags=re.I
-                  ):
-                      continue
-
-              if len(geometries) == 1:
-
-                  geometry = geometries[0]
-
-              else:
-
-                  geometry = {
-                      "type": "MultiPolygon",
-                      "coordinates": [
-                          g["coordinates"]
-                          for g in geometries
-                      ]
-                  }
 
               features.append({
                   "type": "Feature",
@@ -869,9 +783,7 @@ jobs:
                       ),
                       "description": description,
                       "category": category,
-                      "source": (
-                          "NATS UK ICAO AIP Dataset"
-                      ),
+                      "source": "NATS UK ICAO AIP Dataset",
                       "airac": Path(
                           "/tmp/nats-airac-date.txt"
                       ).read_text().strip()
@@ -881,17 +793,19 @@ jobs:
 
           if not features:
               raise SystemExit(
-                  "ERROR: NATS AIP KML produced zero airspace polygons."
+                  "ERROR: NATS KML produced zero airspace polygons."
               )
+
+          output = {
+              "type": "FeatureCollection",
+              "features": features
+          }
 
           Path(
               "/tmp/avimap-data/uk-airspace.geojson"
           ).write_text(
               json.dumps(
-                  {
-                      "type": "FeatureCollection",
-                      "features": features
-                  },
+                  output,
                   separators=(",", ":")
               ),
               encoding="utf-8"
@@ -900,7 +814,6 @@ jobs:
           counts = {}
 
           for feature in features:
-
               category = feature[
                   "properties"
               ][
@@ -911,8 +824,7 @@ jobs:
                   counts.get(
                       category,
                       0
-                  )
-                  + 1
+                  ) + 1
               )
 
           print("")
@@ -934,7 +846,7 @@ jobs:
 
 
       # ============================================================
-      # CONVERT NATS VRPS TO GEOJSON
+      # CONVERT VRPs
       # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
@@ -955,14 +867,11 @@ jobs:
           )
 
           try:
-
               dialect = csv.Sniffer().sniff(
                   raw[:8192],
                   delimiters=",;\t"
               )
-
           except csv.Error:
-
               dialect = csv.excel
 
           rows = list(
@@ -981,19 +890,11 @@ jobs:
               rows[0].keys()
           )
 
-          print("")
-          print("CSV fields:")
-
-          for field in fields:
-              print(
-                  f"  {field}"
-              )
-
           def norm(value):
               return re.sub(
                   r"[^a-z0-9]",
                   "",
-                  str(value).strip().lower()
+                  str(value).lower()
               )
 
           normalised = {
@@ -1003,28 +904,20 @@ jobs:
           }
 
           def find_field(*names):
-
               for name in names:
-
-                  key = norm(
-                      name
-                  )
+                  key = norm(name)
 
                   if key in normalised:
                       return normalised[key]
 
               for key, original in normalised.items():
-
                   for name in names:
-
-                      n = norm(
-                          name
-                      )
+                      wanted = norm(name)
 
                       if (
-                          n in key
+                          wanted in key
                           or
-                          key in n
+                          key in wanted
                       ):
                           return original
 
@@ -1056,6 +949,14 @@ jobs:
           )
 
           print("")
+          print("CSV fields:")
+
+          for field in fields:
+              print(
+                  f"  {field}"
+              )
+
+          print("")
           print("Detected fields:")
           print(
               f"  Name:      {name_field}"
@@ -1069,48 +970,44 @@ jobs:
 
           if not lat_field or not lon_field:
               raise SystemExit(
-                  "ERROR: Could not identify NATS VRP latitude/longitude fields."
+                  "ERROR: Could not identify VRP coordinates."
               )
 
           def parse_coord(value, latitude):
-
               if value is None:
                   return None
 
-              text = str(
+              value = str(
                   value
               ).strip()
 
-              if not text:
+              if not value:
                   return None
-
-              text = text.replace(
-                  ",",
-                  "."
-              )
 
               hemisphere = None
 
               match = re.search(
                   r"([NSEW])\s*$",
-                  text,
+                  value,
                   flags=re.I
               )
 
               if match:
-
                   hemisphere = match.group(
                       1
                   ).upper()
 
-                  text = text[
+                  value = value[
                       :match.start()
                   ].strip()
 
+              # Decimal degrees.
               try:
-
                   number = float(
-                      text
+                      value.replace(
+                          ",",
+                          "."
+                      )
                   )
 
                   limit = (
@@ -1133,54 +1030,45 @@ jobs:
                               number
                           )
 
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
-                          number = abs(
-                              number
-                          )
-
                       return number
 
               except ValueError:
                   pass
 
               compact = (
-                  text
+                  value
                   .replace("°", "")
                   .replace("'", "")
                   .replace('"', "")
                   .replace(" ", "")
               )
 
-              if re.fullmatch(
-                  r"\d+(?:\.\d+)?",
+              # NATS DDMMSS / DDDMMSS.
+              match = re.fullmatch(
+                  r"(\d+)(?:\.(\d+))?",
                   compact
-              ):
+              )
+
+              if match:
+
+                  integer_part = match.group(
+                      1
+                  )
+
+                  decimal_part = (
+                      match.group(2)
+                      or
+                      ""
+                  )
 
                   try:
-
-                      if "." in compact:
-
-                          integer_part, decimal_part = (
-                              compact.split(
-                                  ".",
-                                  1
-                              )
-                          )
-
-                      else:
-
-                          integer_part = compact
-                          decimal_part = ""
 
                       if latitude:
 
                           if len(
                               integer_part
                           ) < 6:
-                              raise ValueError
+                              return None
 
                           degrees = int(
                               integer_part[:2]
@@ -1199,7 +1087,7 @@ jobs:
                           if len(
                               integer_part
                           ) < 7:
-                              raise ValueError
+                              return None
 
                           degrees = int(
                               integer_part[:3]
@@ -1214,7 +1102,6 @@ jobs:
                           )
 
                       if decimal_part:
-
                           seconds_text += (
                               "."
                               + decimal_part
@@ -1224,21 +1111,12 @@ jobs:
                           seconds_text
                       )
 
-                      limit = (
-                          90
-                          if latitude
-                          else 180
-                      )
-
-                      if degrees > limit:
-                          raise ValueError
-
                       if (
                           minutes >= 60
                           or
                           seconds >= 60
                       ):
-                          raise ValueError
+                          return None
 
                       result = (
                           degrees
@@ -1246,120 +1124,27 @@ jobs:
                           + seconds / 3600
                       )
 
+                      limit = (
+                          90
+                          if latitude
+                          else 180
+                      )
+
+                      if result > limit:
+                          return None
+
                       if hemisphere in (
                           "S",
                           "W"
                       ):
-
-                          result = -abs(
-                              result
-                          )
-
-                      elif hemisphere in (
-                          "N",
-                          "E"
-                      ):
-
-                          result = abs(
-                              result
-                          )
+                          result = -result
 
                       return result
 
-                  except (
-                      ValueError,
-                      IndexError
-                  ):
-
-                      pass
-
-              try:
-
-                  numbers = re.findall(
-                      r"[-+]?\d+(?:\.\d+)?",
-                      text
-                  )
-
-                  if not numbers:
+                  except ValueError:
                       return None
 
-                  values = [
-                      float(number)
-                      for number in numbers
-                  ]
-
-                  degrees = abs(
-                      values[0]
-                  )
-
-                  minutes = (
-                      abs(values[1])
-                      if len(values) > 1
-                      else 0
-                  )
-
-                  seconds = (
-                      abs(values[2])
-                      if len(values) > 2
-                      else 0
-                  )
-
-                  if (
-                      minutes >= 60
-                      or
-                      seconds >= 60
-                  ):
-                      return None
-
-                  result = (
-                      degrees
-                      + minutes / 60
-                      + seconds / 3600
-                  )
-
-                  if hemisphere in (
-                      "S",
-                      "W"
-                  ):
-
-                      result = -abs(
-                          result
-                      )
-
-                  elif hemisphere in (
-                      "N",
-                      "E"
-                  ):
-
-                      result = abs(
-                          result
-                      )
-
-                  elif values[0] < 0:
-
-                      result = -result
-
-                  limit = (
-                      90
-                      if latitude
-                      else 180
-                  )
-
-                  if not (
-                      -limit
-                      <= result
-                      <= limit
-                  ):
-                      return None
-
-                  return result
-
-              except (
-                  ValueError,
-                  IndexError
-              ):
-
-                  return None
+              return None
 
           features = []
           invalid = 0
@@ -1388,32 +1173,12 @@ jobs:
                   or
                   longitude is None
               ):
-
-                  invalid += 1
-                  continue
-
-              if not (
-                  -90
-                  <= latitude
-                  <= 90
-              ):
-
-                  invalid += 1
-                  continue
-
-              if not (
-                  -180
-                  <= longitude
-                  <= 180
-              ):
-
                   invalid += 1
                   continue
 
               name = ""
 
               if name_field:
-
                   name = str(
                       row.get(
                           name_field,
@@ -1422,15 +1187,14 @@ jobs:
                   ).strip()
 
               if not name:
-
                   name = (
                       f"VRP {index}"
                   )
 
               properties = {
-                  str(k).strip(): v
-                  for k, v in row.items()
-                  if k
+                  str(key): value
+                  for key, value in row.items()
+                  if key
               }
 
               properties["name"] = name
@@ -1465,8 +1229,7 @@ jobs:
           )
           print("")
 
-          if len(features) == 0:
-
+          if not features:
               raise SystemExit(
                   "ERROR: NATS VRP conversion produced ZERO valid VRPs. "
                   "Existing repository data will NOT be replaced."
@@ -1515,12 +1278,12 @@ jobs:
           echo ""
 
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
-            echo "ERROR: Generated NATS airspace dataset is empty."
+            echo "ERROR: Generated airspace data is empty."
             exit 1
           fi
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
-            echo "ERROR: Generated NATS VRP dataset is empty."
+            echo "ERROR: Generated VRP data is empty."
             exit 1
           fi
 
@@ -1549,7 +1312,7 @@ jobs:
           cat > data/SOURCES.md <<'EOF'
           # AviMap UK aviation data
 
-          AviMap UK aviation data is sourced from NATS UK digital datasets.
+          Aviation data is sourced from NATS UK digital datasets.
 
           Airspace:
           - UK ICAO AIP Dataset
@@ -1559,13 +1322,13 @@ jobs:
           Reporting points:
           - NATS Visual Reference Points (VRP) List
 
-          The GitHub Actions workflow validates both generated datasets
-          before replacing the repository data.
+          The GitHub Actions workflow validates both datasets before
+          replacing the repository data.
           EOF
 
 
       # ============================================================
-      # COMMIT ONLY VALID DATA
+      # COMMIT
       # ============================================================
 
       - name: Commit updated NATS aviation data
@@ -1592,12 +1355,9 @@ jobs:
           echo ""
 
           if git diff --cached --quiet; then
-
             echo "No changes detected."
             echo "Existing aviation data remains untouched."
-
           else
-
             git diff --cached --stat
 
             git commit \
@@ -1609,5 +1369,4 @@ jobs:
             echo "=========================================="
             echo "NATS AVIATION DATA UPDATE COMPLETE"
             echo "=========================================="
-
           fi
