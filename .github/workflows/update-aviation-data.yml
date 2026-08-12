@@ -211,7 +211,7 @@ jobs:
       # NATS VRPs
       # ------------------------------------------------------------
 
-      - name: Find current NATS VRP dataset
+        - name: Find current NATS VRP dataset
         run: |
           set -e
 
@@ -231,6 +231,7 @@ jobs:
           python3 <<'PY'
 
           import re
+          from datetime import datetime, timezone
           from urllib.parse import urljoin
 
           html = open(
@@ -239,29 +240,52 @@ jobs:
               errors="replace"
           ).read()
 
+          # Find all NATS VRP ZIP files.
           hrefs = re.findall(
               r'href=["\']([^"\']+)["\']',
               html,
               flags=re.I
           )
 
-          candidates = []
+          datasets = []
 
           for href in hrefs:
 
-              if re.search(
-                  r'EG_VRP_DS_AREA1_FULL_[^"\']+\.CSV$',
+              match = re.search(
+                  r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
                   href,
                   flags=re.I
-              ):
-                  candidates.append(href)
+              )
 
-          if not candidates:
+              if not match:
+                  continue
 
-              print("Could not find NATS VRP CSV.")
+              date_text = match.group(1)
+
+              try:
+
+                  effective_date = datetime.strptime(
+                      date_text,
+                      "%Y%m%d"
+                  ).date()
+
+              except ValueError:
+
+                  continue
+
+              datasets.append(
+                  (
+                      effective_date,
+                      href
+                  )
+              )
+
+          if not datasets:
+
+              print("ERROR: No NATS VRP ZIP datasets found.")
 
               print("")
-              print("Links found containing VRP:")
+              print("VRP links found:")
 
               for href in hrefs:
 
@@ -271,14 +295,60 @@ jobs:
 
               raise SystemExit(1)
 
+          today = datetime.now(
+              timezone.utc
+          ).date()
+
+          print("")
+          print("Available NATS VRP datasets:")
+
+          for date, href in sorted(datasets):
+
+              marker = ""
+
+              if date <= today:
+
+                  marker = " <-- current/available"
+
+              print(
+                  f"  {date}  {href}{marker}"
+              )
+
+          # Select the latest dataset whose effective date is not in the
+          # future. This prevents us accidentally using next AIRAC data.
+          current = [
+              item
+              for item in datasets
+              if item[0] <= today
+          ]
+
+          if current:
+
+              effective_date, href = max(
+                  current,
+                  key=lambda item: item[0]
+              )
+
+          else:
+
+              # Safety fallback if NATS only publishes a future dataset.
+              effective_date, href = min(
+                  datasets,
+                  key=lambda item: item[0]
+              )
+
           url = urljoin(
               "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html",
-              candidates[0]
+              href
           )
 
           print("")
-          print("NATS VRP URL:")
-          print(url)
+          print("==========================================")
+          print("SELECTED NATS VRP DATASET")
+          print("==========================================")
+          print("")
+          print("Effective date:", effective_date)
+          print("URL:", url)
           print("")
 
           open(
@@ -286,9 +356,86 @@ jobs:
               "w"
           ).write(url)
 
+          open(
+              "/tmp/nats-vrp-date.txt",
+              "w"
+          ).write(str(effective_date))
+
           PY
 
+
       - name: Download NATS VRPs
+        run: |
+          set -e
+
+          VRP_URL=$(cat /tmp/nats-vrp-url.txt)
+
+          echo "=========================================="
+          echo "Downloading NATS VRP dataset"
+          echo "=========================================="
+
+          echo "URL:"
+          echo "$VRP_URL"
+
+          mkdir -p /tmp/nats-vrp
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            -L \
+            "$VRP_URL" \
+            -o /tmp/nats-vrp.zip
+
+          if [ ! -s /tmp/nats-vrp.zip ]; then
+            echo "ERROR: NATS VRP ZIP is empty."
+            exit 1
+          fi
+
+          echo ""
+          echo "Downloaded ZIP:"
+          ls -lh /tmp/nats-vrp.zip
+
+          echo ""
+          echo "ZIP contents:"
+          unzip -l /tmp/nats-vrp.zip
+
+          unzip \
+            -o \
+            /tmp/nats-vrp.zip \
+            -d /tmp/nats-vrp
+
+          echo ""
+          echo "Extracted files:"
+          find /tmp/nats-vrp -type f -print
+
+          # Locate the CSV inside the ZIP.
+          VRP_CSV=$(find /tmp/nats-vrp \
+            -type f \
+            \( -iname "*.csv" -o -iname "*.CSV" \) \
+            | head -n 1)
+
+          if [ -z "$VRP_CSV" ]; then
+            echo ""
+            echo "ERROR: No CSV file found inside NATS VRP ZIP."
+            exit 1
+          fi
+
+          echo ""
+          echo "Selected VRP CSV:"
+          echo "$VRP_CSV"
+
+          cp "$VRP_CSV" /tmp/uk-vrps.csv
+
+          echo ""
+          echo "CSV size:"
+          wc -c /tmp/uk-vrps.csv
+
+          echo ""
+          echo "First 10 lines:"
+          head -n 10 /tmp/uk-vrps.csv
         run: |
           set -e
 
