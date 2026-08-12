@@ -14,16 +14,8 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # CHECKOUT
-      # ============================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # ============================================================
-      # DEPENDENCIES
-      # ============================================================
 
       - name: Install conversion dependencies
         run: |
@@ -37,14 +29,6 @@ jobs:
             file \
             jq \
             python3
-
-      # ============================================================
-      # FIND CURRENT NATS DATASETS
-      #
-      # IMPORTANT:
-      # We discover the actual href supplied by NATS.
-      # We do not manufacture download URLs.
-      # ============================================================
 
       - name: Find current NATS datasets
         run: |
@@ -83,7 +67,6 @@ jobs:
                   super().__init__(
                       convert_charrefs=True
                   )
-
                   self.links = []
                   self.href = None
                   self.text = []
@@ -94,10 +77,7 @@ jobs:
 
                   attrs = dict(attrs)
 
-                  self.href = attrs.get(
-                      "href"
-                  )
-
+                  self.href = attrs.get("href")
                   self.text = []
 
               def handle_data(self, data):
@@ -110,13 +90,10 @@ jobs:
                       and
                       self.href is not None
                   ):
-
                       self.links.append(
                           (
                               self.href,
-                              " ".join(
-                                  self.text
-                              )
+                              " ".join(self.text)
                           )
                       )
 
@@ -124,11 +101,11 @@ jobs:
                       self.text = []
 
           def fetch(url):
+
               request = urllib.request.Request(
                   url,
                   headers={
-                      "User-Agent":
-                          USER_AGENT
+                      "User-Agent": USER_AGENT
                   }
               )
 
@@ -146,6 +123,7 @@ jobs:
                   )
 
           def parse_links(base_url, body):
+
               parser = LinkParser()
 
               parser.feed(
@@ -187,6 +165,7 @@ jobs:
               return result
 
           def compact(value):
+
               return re.sub(
                   r"[^A-Z0-9]",
                   "",
@@ -194,6 +173,7 @@ jobs:
               )
 
           def is_aip_link(url, text, airac):
+
               value = compact(
                   url + " " + text
               )
@@ -224,6 +204,7 @@ jobs:
               return False
 
           def is_vrp_link(url, text, airac):
+
               value = compact(
                   url + " " + text
               )
@@ -249,17 +230,13 @@ jobs:
 
               return False
 
-          # --------------------------------------------------------
-          # Find latest checklist.
-          # --------------------------------------------------------
+          print(
+              "Searching NATS Dataset Checklists..."
+          )
 
           checklist_body = None
           checklist_url = None
           checklist_date = None
-
-          print(
-              "Searching NATS Dataset Checklists..."
-          )
 
           for offset in range(90):
 
@@ -312,6 +289,7 @@ jobs:
                   checklist_body = body
                   checklist_url = candidate
                   checklist_date = candidate_date
+
                   break
 
               if checklist_body is not None:
@@ -319,8 +297,7 @@ jobs:
 
           if checklist_body is None:
               raise SystemExit(
-                  "ERROR: Could not find current "
-                  "NATS Dataset Checklist."
+                  "ERROR: Could not find current NATS Dataset Checklist."
               )
 
           print(
@@ -337,10 +314,6 @@ jobs:
               "utf-8",
               errors="replace"
           )
-
-          # --------------------------------------------------------
-          # AIP AIRAC.
-          # --------------------------------------------------------
 
           aip_matches = re.findall(
               r"EG_AIP_DS_FULL_(\d{8})\.XML",
@@ -381,10 +354,6 @@ jobs:
           aip_filename = (
               f"EG_AIP_DS_FULL_{aip_stamp}.XML"
           )
-
-          # --------------------------------------------------------
-          # VRP AIRAC.
-          # --------------------------------------------------------
 
           vrp_matches = re.findall(
               r"EG_VRP_DS_AREA1_FULL_(\d{8})\.CSV",
@@ -448,16 +417,13 @@ jobs:
               vrp_filename
           )
 
-          # --------------------------------------------------------
-          # Parse links.
-          # --------------------------------------------------------
-
           checklist_links = parse_links(
               checklist_url,
               checklist_body
           )
 
           try:
+
               index_body, _ = fetch(
                   INDEX_URL
               )
@@ -475,10 +441,6 @@ jobs:
               )
 
               index_links = []
-
-          # --------------------------------------------------------
-          # AIP links.
-          # --------------------------------------------------------
 
           aip_links = []
           seen = set()
@@ -507,10 +469,6 @@ jobs:
                       )
                   )
 
-          # --------------------------------------------------------
-          # Follow linked pages.
-          # --------------------------------------------------------
-
           expanded = []
 
           for url, text in list(
@@ -529,6 +487,7 @@ jobs:
                   continue
 
               try:
+
                   body, _ = fetch(
                       url
                   )
@@ -581,10 +540,6 @@ jobs:
 
           aip_links = unique
 
-          # --------------------------------------------------------
-          # VRP links.
-          # --------------------------------------------------------
-
           vrp_links = []
           seen = set()
 
@@ -612,23 +567,12 @@ jobs:
                       )
                   )
 
-          # --------------------------------------------------------
-          # Save discovery information.
-          # --------------------------------------------------------
-
           Path(
               "/tmp/nats-aip-date.txt"
           ).write_text(
               aip_date.strftime(
                   "%Y-%m-%d"
               ),
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-aip-filename.txt"
-          ).write_text(
-              aip_filename,
               encoding="utf-8"
           )
 
@@ -643,22 +587,6 @@ jobs:
           )
 
           Path(
-              "/tmp/nats-vrp-date.txt"
-          ).write_text(
-              vrp_date.strftime(
-                  "%Y-%m-%d"
-              ),
-              encoding="utf-8"
-          )
-
-          Path(
-              "/tmp/nats-vrp-filename.txt"
-          ).write_text(
-              vrp_filename,
-              encoding="utf-8"
-          )
-
-          Path(
               "/tmp/nats-vrp-links.txt"
           ).write_text(
               "\n".join(
@@ -669,9 +597,7 @@ jobs:
           )
 
           print("")
-          print(
-              "NATS AIP links:"
-          )
+          print("NATS AIP links:")
 
           for url, text in aip_links:
               print(
@@ -681,9 +607,7 @@ jobs:
               )
 
           print("")
-          print(
-              "NATS VRP links:"
-          )
+          print("NATS VRP links:")
 
           for url, text in vrp_links:
               print(
@@ -703,10 +627,6 @@ jobs:
               )
 
           PY
-
-      # ============================================================
-      # DOWNLOAD AIP
-      # ============================================================
 
       - name: Download NATS AIP dataset
         run: |
@@ -782,22 +702,10 @@ jobs:
                   /tmp/uk-aip.xml
 
                 FOUND="${URL}"
+
                 break
 
               fi
-
-            fi
-
-            if grep -aqi \
-              "<[^>]*Airspace" \
-              /tmp/nats-aip-download; then
-
-              cp \
-                /tmp/nats-aip-download \
-                /tmp/uk-aip.xml
-
-              FOUND="${URL}"
-              break
 
             fi
 
@@ -831,10 +739,6 @@ jobs:
               "AIXM XML parses successfully."
           )
           PY
-
-      # ============================================================
-      # DOWNLOAD VRP
-      # ============================================================
 
       - name: Download NATS VRP dataset
         run: |
@@ -910,23 +814,10 @@ jobs:
                   /tmp/uk-vrps.csv
 
                 FOUND="${URL}"
+
                 break
 
               fi
-
-            fi
-
-            # Direct CSV fallback.
-            if grep -aqi \
-              "latitude\|longitude\|latitude.*longitude" \
-              /tmp/nats-vrp-download; then
-
-              cp \
-                /tmp/nats-vrp-download \
-                /tmp/uk-vrps.csv
-
-              FOUND="${URL}"
-              break
 
             fi
 
@@ -954,34 +845,6 @@ jobs:
           echo ""
           echo "VRP first 10 lines:"
           head -n 10 /tmp/uk-vrps.csv
-
-      # ============================================================
-      # CONVERT AIXM AIRSPACE
-      #
-      # IMPORTANT CHANGE:
-      #
-      # We DO NOT convert NATS classifications into PA / RA / DA.
-      #
-      # The source classification is retained exactly as supplied
-      # by NATS/AIXM:
-      #
-      #   airspace_class
-      #   airspace_type
-      #   local_type
-      #
-      # The filter uses those source values.
-      #
-      # For Class A-G:
-      #   AIXM AirspaceClass = A-G
-      #
-      # For P/R/D:
-      #   AIXM AirspaceType = P/R/D
-      #
-      # For ATZ/MATZ/RMZ/TMZ:
-      #   AIXM local/type fields are retained and matched directly.
-      #
-      # No PA/RA/DA translation is performed.
-      # ============================================================
 
       - name: Convert NATS AIXM airspace to GeoJSON
         run: |
@@ -1020,8 +883,9 @@ jobs:
                   "}",
                   1
               )[-1]
-
+          
           def attr_local(element, wanted):
+
               wanted = wanted.lower()
 
               for key, value in element.attrib.items():
@@ -1031,21 +895,12 @@ jobs:
 
               return None
 
-          # --------------------------------------------------------
-          # Parent index.
-          # --------------------------------------------------------
-
           parent = {}
 
           for parent_element in root.iter():
 
               for child in parent_element:
-
                   parent[child] = parent_element
-
-          # --------------------------------------------------------
-          # Global xlink/id index.
-          # --------------------------------------------------------
 
           index = {}
 
@@ -1053,7 +908,11 @@ jobs:
 
               for key, value in element.attrib.items():
 
-                  if local(key).lower() == "id" and value:
+                  if (
+                      local(key).lower() == "id"
+                      and
+                      value
+                  ):
 
                       index[
                           value.lstrip("#")
@@ -1076,9 +935,6 @@ jobs:
                   "#",
                   1
               )[-1].strip()
-
-              if not reference:
-                  return element
 
               return index.get(
                   reference,
@@ -1126,10 +982,6 @@ jobs:
 
               return result
 
-          # --------------------------------------------------------
-          # Text extraction.
-          # --------------------------------------------------------
-
           def values_for(element, names):
 
               wanted = {
@@ -1166,15 +1018,10 @@ jobs:
                   names
               )
 
-              return (
-                  values[0]
-                  if values
-                  else ""
-              )
+              if values:
+                  return values[0]
 
-          # --------------------------------------------------------
-          # Coordinates.
-          # --------------------------------------------------------
+              return ""
 
           def current_srs(element):
 
@@ -1218,7 +1065,7 @@ jobs:
                       2,
                       int(value)
                   )
-              except (TypeError, ValueError):
+              except:
                   return 2
 
           def number_list(text):
@@ -1240,7 +1087,7 @@ jobs:
                       result.append(
                           float(token)
                       )
-                  except ValueError:
+                  except:
                       pass
 
               return result
@@ -1317,7 +1164,6 @@ jobs:
                   }:
 
                       if node.text:
-
                           result.extend(
                               pair_list(
                                   node,
@@ -1341,6 +1187,7 @@ jobs:
                               continue
 
                           try:
+
                               first = float(
                                   bits[0]
                               )
@@ -1349,7 +1196,7 @@ jobs:
                                   bits[1]
                               )
 
-                          except ValueError:
+                          except:
                               continue
 
                           srs = current_srs(
@@ -1380,10 +1227,6 @@ jobs:
 
               return result
 
-          # --------------------------------------------------------
-          # Circular geometry.
-          # --------------------------------------------------------
-
           def radius_metres(element):
 
               node = None
@@ -1404,7 +1247,7 @@ jobs:
                   radius = float(
                       node.text.strip()
                   )
-              except ValueError:
+              except:
                   return None
 
               uom = (
@@ -1424,7 +1267,7 @@ jobs:
                   "kilometers"
               }:
 
-                  radius *= 1000.0
+                  radius *= 1000
 
               elif uom in {
                   "nm",
@@ -1432,19 +1275,21 @@ jobs:
                   "[nmi_i]"
               }:
 
-                  radius *= 1852.0
+                  radius *= 1852
 
               return radius
 
-          def angle_value(element, name):
+          def angle_value(
+              element,
+              name
+          ):
 
               for child in element.iter():
 
                   if (
                       local(
                           child.tag
-                      )
-                      == name
+                      ) == name
                       and
                       child.text
                   ):
@@ -1453,7 +1298,7 @@ jobs:
                           return float(
                               child.text.strip()
                           )
-                      except ValueError:
+                      except:
                           return None
 
               return None
@@ -1467,8 +1312,7 @@ jobs:
                   if (
                       local(
                           child.tag
-                      )
-                      == "pos"
+                      ) == "pos"
                       and
                       child.text
                   ):
@@ -1534,20 +1378,20 @@ jobs:
               delta = end - start
 
               if delta == 0:
-                  delta = 360.0
+                  delta = 360
 
-              while delta > 360.0:
-                  delta -= 360.0
+              while delta > 360:
+                  delta -= 360
 
-              while delta < -360.0:
-                  delta += 360.0
+              while delta < -360:
+                  delta += 360
 
               steps = min(
                   180,
                   max(
                       8,
                       int(
-                          abs(delta) / 4.0
+                          abs(delta) / 4
                       )
                   )
               )
@@ -1578,6 +1422,20 @@ jobs:
 
                   lat = center[1]
 
+                  lat = (
+                      center[1]
+                      +
+                      (
+                          radius
+                          *
+                          math.sin(
+                              radians
+                          )
+                          /
+                          111320
+                      )
+                  )
+
                   lon = (
                       center[0]
                       +
@@ -1589,7 +1447,7 @@ jobs:
                           )
                           /
                           (
-                              111320.0
+                              111320
                               *
                               max(
                                   0.05,
@@ -1603,20 +1461,6 @@ jobs:
                       )
                   )
 
-                  lat = (
-                      center[1]
-                      +
-                      (
-                          radius
-                          *
-                          math.sin(
-                              radians
-                          )
-                          /
-                          111320.0
-                      )
-                  )
-
                   points.append(
                       [
                           lon,
@@ -1625,10 +1469,6 @@ jobs:
                   )
 
               return points
-
-          # --------------------------------------------------------
-          # Curve segments.
-          # --------------------------------------------------------
 
           SEGMENTS = {
               "LineStringSegment",
@@ -1683,15 +1523,11 @@ jobs:
                   )
 
                   if (
-                      name
-                      ==
-                      "CircleByCenterPoint"
+                      name == "CircleByCenterPoint"
                       and
                       points
                       and
-                      points[0]
-                      !=
-                      points[-1]
+                      points[0] != points[-1]
                   ):
 
                       points.append(
@@ -1735,10 +1571,6 @@ jobs:
               return direct_coordinates(
                   target
               )
-
-          # --------------------------------------------------------
-          # Rings.
-          # --------------------------------------------------------
 
           def ring_points(ring):
 
@@ -1797,9 +1629,7 @@ jobs:
                   if (
                       not cleaned
                       or
-                      point
-                      !=
-                      cleaned[-1]
+                      point != cleaned[-1]
                   ):
 
                       cleaned.append(
@@ -1821,10 +1651,6 @@ jobs:
                   return cleaned
 
               return []
-
-          # --------------------------------------------------------
-          # Surfaces.
-          # --------------------------------------------------------
 
           def surfaces_for_airspace(
               airspace
@@ -1882,7 +1708,9 @@ jobs:
                               continue
 
                           seen.add(marker)
-                          result.append(item)
+                          result.append(
+                              item
+                          )
 
               return result
 
@@ -1936,7 +1764,7 @@ jobs:
                                   ) in {
                                       "LinearRing",
                                       "Ring"
-                                  }:
+                                  ):
 
                                       points = ring_points(
                                           ring
@@ -1960,24 +1788,15 @@ jobs:
                           continue
 
                       polygons.append(
-                          [
-                              outer
-                          ]
+                          [outer]
                           +
                           interiors
                       )
 
               return polygons
 
-          # ========================================================
-          # NATS CLASSIFICATION
-          #
-          # NO PA / RA / DA CONVERSION.
-          #
-          # We preserve the NATS fields and use them directly.
-          # ========================================================
-
           def clean(value):
+
               return re.sub(
                   r"\s+",
                   " ",
@@ -1985,6 +1804,7 @@ jobs:
               )
 
           def compact(value):
+
               return re.sub(
                   r"[^A-Z0-9]",
                   "",
@@ -2035,10 +1855,6 @@ jobs:
                   }
               )
 
-              # ----------------------------------------------------
-              # Class A-G is sourced directly from AirspaceClass.
-              # ----------------------------------------------------
-
               class_code = compact(
                   airspace_class
               )
@@ -2056,29 +1872,19 @@ jobs:
                   return {
                       "category":
                           class_code,
-
                       "category_source":
                           "airspace_class",
-
                       "airspace_class":
                           airspace_class,
-
                       "airspace_type":
                           airspace_type,
-
                       "local_type":
                           local_type,
-
                       "designator":
                           designator,
-
                       "name":
                           name
                   }
-
-              # ----------------------------------------------------
-              # P/R/D are retained exactly as NATS type codes.
-              # ----------------------------------------------------
 
               type_code = compact(
                   airspace_type
@@ -2093,31 +1899,19 @@ jobs:
                   return {
                       "category":
                           type_code,
-
                       "category_source":
                           "airspace_type",
-
                       "airspace_class":
                           airspace_class,
-
                       "airspace_type":
                           airspace_type,
-
                       "local_type":
                           local_type,
-
                       "designator":
                           designator,
-
                       "name":
                           name
                   }
-
-              # ----------------------------------------------------
-              # Special zones are matched using the NATS/AIXM
-              # source values, without translating them to another
-              # AviMap category.
-              # ----------------------------------------------------
 
               candidates = [
                   local_type,
@@ -2139,44 +1933,31 @@ jobs:
                       "TMZ"
                   }:
 
+                      if value == local_type:
+                          source = "local_type"
+                      elif value == airspace_type:
+                          source = "airspace_type"
+                      elif value == designator:
+                          source = "designator"
+                      else:
+                          source = "name"
+
                       return {
                           "category":
                               code,
-
                           "category_source":
-                              (
-                                  "local_type"
-                                  if value == local_type
-                                  else
-                                  "airspace_type"
-                                  if value == airspace_type
-                                  else
-                                  "designator"
-                                  if value == designator
-                                  else
-                                  "name"
-                              ),
-
+                              source,
                           "airspace_class":
                               airspace_class,
-
                           "airspace_type":
                               airspace_type,
-
                           "local_type":
                               local_type,
-
                           "designator":
                               designator,
-
                           "name":
                               name
                       }
-
-              # Textual NATS values are allowed only where the
-              # source field explicitly contains the zone name.
-              #
-              # This does NOT rename it to an AviMap category.
 
               for value in candidates:
 
@@ -2184,68 +1965,46 @@ jobs:
                       value
                   )
 
-                  if code in {
-                      "AERODROMETRAFFICZONE",
-                      "MILITARYAERODROMETRAFFICZONE",
-                      "RADIOMANDATORYZONE",
-                      "TRANSPONDERMANDATORYZONE"
-                  }:
+                  names = {
+                      "AERODROMETRAFFICZONE":
+                          "ATZ",
+                      "MILITARYAERODROMETRAFFICZONE":
+                          "MATZ",
+                      "RADIOMANDATORYZONE":
+                          "RMZ",
+                      "TRANSPONDERMANDATORYZONE":
+                          "TMZ"
+                  }
 
-                      category = {
-                          "AERODROMETRAFFICZONE":
-                              "ATZ",
+                  if code in names:
 
-                          "MILITARYAERODROMETRAFFICZONE":
-                              "MATZ",
-
-                          "RADIOMANDATORYZONE":
-                              "RMZ",
-
-                          "TRANSPONDERMANDATORYZONE":
-                              "TMZ"
-                      }[
-                          code
-                      ]
+                      if value == local_type:
+                          source = "local_type"
+                      elif value == airspace_type:
+                          source = "airspace_type"
+                      elif value == designator:
+                          source = "designator"
+                      else:
+                          source = "name"
 
                       return {
                           "category":
-                              category,
-
+                              names[code],
                           "category_source":
-                              (
-                                  "local_type"
-                                  if value == local_type
-                                  else
-                                  "airspace_type"
-                                  if value == airspace_type
-                                  else
-                                  "designator"
-                                  if value == designator
-                                  else
-                                  "name"
-                              ),
-
+                              source,
                           "airspace_class":
                               airspace_class,
-
                           "airspace_type":
                               airspace_type,
-
                           "local_type":
                               local_type,
-
                           "designator":
                               designator,
-
                           "name":
                               name
                       }
 
               return None
-
-          # --------------------------------------------------------
-          # Process all NATS Airspace objects.
-          # --------------------------------------------------------
 
           categories = [
               "A",
@@ -2280,7 +2039,6 @@ jobs:
           features = []
           seen_features = set()
 
-          # Diagnostic raw values not selected.
           unselected_types = {}
           unselected_local_types = {}
           unselected_classes = {}
@@ -2328,13 +2086,12 @@ jobs:
                   )
 
                   if airspace_type:
+
                       key = clean(
                           airspace_type
                       )
 
-                      unselected_types[
-                          key
-                      ] = (
+                      unselected_types[key] = (
                           unselected_types.get(
                               key,
                               0
@@ -2344,13 +2101,12 @@ jobs:
                       )
 
                   if local_type:
+
                       key = clean(
                           local_type
                       )
 
-                      unselected_local_types[
-                          key
-                      ] = (
+                      unselected_local_types[key] = (
                           unselected_local_types.get(
                               key,
                               0
@@ -2360,13 +2116,12 @@ jobs:
                       )
 
                   if airspace_class:
+
                       key = clean(
                           airspace_class
                       )
 
-                      unselected_classes[
-                          key
-                      ] = (
+                      unselected_classes[key] = (
                           unselected_classes.get(
                               key,
                               0
@@ -2408,11 +2163,7 @@ jobs:
                   if len(outer) < 4:
                       continue
 
-                  if (
-                      outer[0]
-                      !=
-                      outer[-1]
-                  ):
+                  if outer[0] != outer[-1]:
 
                       outer.append(
                           outer[0]
@@ -2438,7 +2189,6 @@ jobs:
                   geometry = {
                       "type":
                           "Polygon",
-
                       "coordinates":
                           valid_polygons[0]
                   }
@@ -2448,7 +2198,6 @@ jobs:
                   geometry = {
                       "type":
                           "MultiPolygon",
-
                       "coordinates":
                           valid_polygons
                   }
@@ -2482,10 +2231,6 @@ jobs:
               )
 
               properties = {
-                  # ------------------------------------------------
-                  # NATS/AIXM source terminology.
-                  # ------------------------------------------------
-
                   "category":
                       category,
 
@@ -2521,10 +2266,6 @@ jobs:
                           "Unknown airspace"
                       ),
 
-                  # ------------------------------------------------
-                  # Provenance.
-                  # ------------------------------------------------
-
                   "source":
                       "NATS UK ICAO AIP Dataset",
 
@@ -2536,18 +2277,12 @@ jobs:
                   {
                       "type":
                           "Feature",
-
                       "properties":
                           properties,
-
                       "geometry":
                           geometry
                   }
               )
-
-          # --------------------------------------------------------
-          # Diagnostics.
-          # --------------------------------------------------------
 
           print("")
           print(
@@ -2673,35 +2408,29 @@ jobs:
               key=lambda x: (
                   -x[1],
                   x[0]
-              )[:50]:
+              )
+          )[:50]:
 
               print(
                   f"{count:5d}  {value}"
               )
 
-          # --------------------------------------------------------
-          # Safety checks.
-          # --------------------------------------------------------
-
           if raw_count < 1000:
 
               raise SystemExit(
-                  "ERROR: Suspiciously small NATS "
-                  "AIXM Airspace count."
+                  "ERROR: Suspiciously small NATS AIXM Airspace count."
               )
 
           if selected_count == 0:
 
               raise SystemExit(
-                  "ERROR: No NATS airspace categories "
-                  "matched."
+                  "ERROR: No NATS airspace categories matched."
               )
 
           if len(features) == 0:
 
               raise SystemExit(
-                  "ERROR: No valid NATS airspace "
-                  "geometry was produced."
+                  "ERROR: No valid NATS airspace geometry was produced."
               )
 
           Path(
@@ -2711,7 +2440,6 @@ jobs:
                   {
                       "type":
                           "FeatureCollection",
-
                       "features":
                           features
                   },
@@ -2731,15 +2459,6 @@ jobs:
           )
 
           PY
-
-      # ============================================================
-      # CONVERT NATS VRPs
-      #
-      # This version does not assume the CSV uses "Latitude" and
-      # "Longitude" as the exact column names.
-      #
-      # It prints the actual NATS headers and searches more broadly.
-      # ============================================================
 
       - name: Convert NATS VRPs to GeoJSON
         run: |
@@ -2771,20 +2490,6 @@ jobs:
               "=========================================="
           )
 
-          print("")
-          print(
-              "First 20 raw lines:"
-          )
-
-          for line in raw.splitlines()[:20]:
-              print(
-                  repr(line)
-              )
-
-          # --------------------------------------------------------
-          # Detect delimiter from the actual file.
-          # --------------------------------------------------------
-
           sample = raw[:20000]
 
           try:
@@ -2796,10 +2501,8 @@ jobs:
 
           except csv.Error:
 
-              # NATS CSV should normally be comma separated.
               dialect = csv.excel
 
-          print("")
           print(
               "Detected delimiter:",
               repr(
@@ -2844,9 +2547,7 @@ jobs:
               len(rows)
           )
 
-          def normalise(
-              value
-          ):
+          def normalise(value):
 
               return re.sub(
                   r"[^a-z0-9]",
@@ -2889,47 +2590,27 @@ jobs:
                   for candidate in candidates
               ]
 
-              # Prefer columns containing latitude/longitude
-              # terminology.
-
               for key, original in normalised.items():
 
                   for candidate in candidate_keys:
 
                       if candidate in key:
-
                           return original
 
               return None
 
-          # --------------------------------------------------------
-          # Look for actual NATS coordinate fields.
-          # --------------------------------------------------------
-
           lat_field = find_exact(
               [
                   "Latitude",
-                  "Lat",
-                  "Latitude DD",
-                  "Latitude Decimal",
-                  "Lat Decimal",
-                  "Latitude Dec",
-                  "Lat Dec",
-                  "Y"
+                  "Lat"
               ]
           )
 
           lon_field = find_exact(
               [
                   "Longitude",
-                  "Lon",
                   "Long",
-                  "Longitude DD",
-                  "Longitude Decimal",
-                  "Long Decimal",
-                  "Longitude Dec",
-                  "Long Dec",
-                  "X"
+                  "Lon"
               ]
           )
 
@@ -2952,35 +2633,6 @@ jobs:
                   ]
               )
 
-          # --------------------------------------------------------
-          # If NATS supplies combined coordinates, identify those.
-          # --------------------------------------------------------
-
-          coordinate_field = None
-
-          if (
-              lat_field is None
-              or
-              lon_field is None
-          ):
-
-              for field in fields:
-
-                  key = normalise(
-                      field
-                  )
-
-                  if (
-                      "coordinate" in key
-                      or
-                      "position" in key
-                      or
-                      "point" in key
-                  ):
-
-                      coordinate_field = field
-                      break
-
           print("")
           print(
               "Latitude field:",
@@ -2992,10 +2644,15 @@ jobs:
               lon_field
           )
 
-          print(
-              "Combined coordinate field:",
-              coordinate_field
-          )
+          if (
+              lat_field is None
+              or
+              lon_field is None
+          ):
+
+              raise SystemExit(
+                  "ERROR: Could not identify NATS latitude/longitude columns."
+              )
 
           def parse_coordinate(
               value,
@@ -3011,10 +2668,6 @@ jobs:
 
               if not text:
                   return None
-
-              # ----------------------------------------------------
-              # Decimal degrees with optional hemisphere.
-              # ----------------------------------------------------
 
               hemisphere = None
 
@@ -3039,10 +2692,7 @@ jobs:
                       .strip()
                   )
 
-              # ----------------------------------------------------
-              # Plain decimal.
-              # ----------------------------------------------------
-
+              # Decimal degrees.
               try:
 
                   number = float(
@@ -3079,74 +2729,65 @@ jobs:
               except ValueError:
                   pass
 
-              # ----------------------------------------------------
-              # Degrees/minutes/seconds.
-              # ----------------------------------------------------
+              # NATS DMS format:
+              # 514645N
+              # 0001328W
+              # 515016.7091N
 
-              numbers = re.findall(
-                  r"[-+]?\d+(?:\.\d+)?",
-                  text
-              )
+              if hemisphere:
 
-              if len(numbers) >= 2:
+                  numbers = re.sub(
+                      r"[^0-9.]",
+                      "",
+                      text
+                  )
 
                   try:
 
-                      degrees = float(
-                          numbers[0]
-                      )
+                      if len(numbers.split(".")[0]) >= 6:
 
-                      minutes = float(
-                          numbers[1]
-                      )
+                          if latitude:
 
-                      seconds = (
-                          float(
-                              numbers[2]
-                          )
-                          if len(numbers) >= 3
-                          else
-                          0.0
-                      )
+                              degrees = float(
+                                  numbers[:2]
+                              )
 
-                      sign = (
-                          -1
-                          if degrees < 0
-                          else
-                          1
-                      )
+                              minutes = float(
+                                  numbers[2:4]
+                              )
 
-                      number = (
-                          abs(degrees)
-                          +
-                          minutes / 60.0
-                          +
-                          seconds / 3600.0
-                      )
+                              seconds = float(
+                                  numbers[4:]
+                              )
 
-                      number *= sign
+                          else:
 
-                      if hemisphere in {
-                          "S",
-                          "W"
-                      }:
+                              degrees = float(
+                                  numbers[:3]
+                              )
 
-                          number = -abs(
-                              number
+                              minutes = float(
+                                  numbers[3:5]
+                              )
+
+                              seconds = float(
+                                  numbers[5:]
+                              )
+
+                          number = (
+                              degrees
+                              +
+                              minutes / 60
+                              +
+                              seconds / 3600
                           )
 
-                      limit = (
-                          90
-                          if latitude
-                          else
-                          180
-                      )
+                          if hemisphere in {
+                              "S",
+                              "W"
+                          }:
 
-                      if (
-                          -limit
-                          <= number
-                          <= limit
-                      ):
+                              number = -number
 
                           return number
 
@@ -3155,124 +2796,33 @@ jobs:
 
               return None
 
-          def parse_combined(
-              value
-          ):
-
-              if value is None:
-                  return None
-
-              text = str(
-                  value
-              ).strip()
-
-              if not text:
-                  return None
-
-              # Try "lat, lon".
-              pieces = re.split(
-                  r"\s*[,;/]\s*",
-                  text
-              )
-
-              if len(pieces) >= 2:
-
-                  lat = parse_coordinate(
-                      pieces[0],
-                      True
-                  )
-
-                  lon = parse_coordinate(
-                      pieces[1],
-                      False
-                  )
-
-                  if (
-                      lat is not None
-                      and
-                      lon is not None
-                  ):
-
-                      return (
-                          lat,
-                          lon
-                      )
-
-              return None
-
-          # --------------------------------------------------------
-          # Name field.
-          # --------------------------------------------------------
-
           name_field = find_exact(
               [
-                  "VRP Name",
+                  "VRP name",
                   "Name",
                   "Designator",
                   "Identifier",
-                  "Point Name",
-                  "VRP",
-                  "Point"
+                  "VRP"
               ]
           )
-
-          if name_field is None:
-
-              name_field = find_contains(
-                  [
-                      "Name",
-                      "Designator",
-                      "Identifier",
-                      "VRP"
-                  ]
-              )
 
           features = []
 
           for row in rows:
 
-              latitude = None
-              longitude = None
+              latitude = parse_coordinate(
+                  row.get(
+                      lat_field
+                  ),
+                  True
+              )
 
-              if (
-                  lat_field is not None
-                  and
-                  lon_field is not None
-              ):
-
-                  latitude = parse_coordinate(
-                      row.get(
-                          lat_field
-                      ),
-                      True
-                  )
-
-                  longitude = parse_coordinate(
-                      row.get(
-                          lon_field
-                      ),
-                      False
-                  )
-
-              if (
-                  latitude is None
-                  or
-                  longitude is None
-              ):
-
-                  if coordinate_field:
-
-                      combined = parse_combined(
-                          row.get(
-                              coordinate_field
-                          )
-                      )
-
-                      if combined:
-
-                          latitude, longitude = (
-                              combined
-                          )
+              longitude = parse_coordinate(
+                  row.get(
+                      lon_field
+                  ),
+                  False
+              )
 
               if (
                   latitude is None
@@ -3300,12 +2850,6 @@ jobs:
                       )
                   ).strip()
 
-              else:
-
-                  properties[
-                      "name"
-                  ] = "VRP"
-
               properties[
                   "source"
               ] = (
@@ -3316,15 +2860,12 @@ jobs:
                   {
                       "type":
                           "Feature",
-
                       "properties":
                           properties,
-
                       "geometry":
                           {
                               "type":
                                   "Point",
-
                               "coordinates":
                                   [
                                       longitude,
@@ -3343,9 +2884,7 @@ jobs:
           if not features:
 
               raise SystemExit(
-                  "ERROR: Zero valid VRPs. "
-                  "See printed NATS headers and "
-                  "sample rows above."
+                  "ERROR: Zero valid VRPs."
               )
 
           Path(
@@ -3356,7 +2895,6 @@ jobs:
                   {
                       "type":
                           "FeatureCollection",
-
                       "features":
                           features
                   },
@@ -3371,10 +2909,6 @@ jobs:
 
           PY
 
-      # ============================================================
-      # VALIDATE DATA
-      # ============================================================
-
       - name: Validate generated NATS data
         run: |
           set -euo pipefail
@@ -3386,14 +2920,12 @@ jobs:
           test -s "${VRP_FILE}"
 
           AIRSPACE_COUNT=$(
-            jq \
-              '.features | length' \
+            jq '.features | length' \
               "${AIRSPACE_FILE}"
           )
 
           VRP_COUNT=$(
-            jq \
-              '.features | length' \
+            jq '.features | length' \
               "${VRP_FILE}"
           )
 
@@ -3417,24 +2949,24 @@ jobs:
           ' \
             "${AIRSPACE_FILE}"
 
-          echo ""
-
           if [ "${AIRSPACE_COUNT}" -eq 0 ]; then
+
             echo "ERROR: Zero airspaces."
+
             exit 1
+
           fi
 
           if [ "${VRP_COUNT}" -eq 0 ]; then
+
             echo "ERROR: Zero VRPs."
+
             exit 1
+
           fi
 
           echo ""
           echo "Validation successful."
-
-      # ============================================================
-      # INSTALL DATA
-      # ============================================================
 
       - name: Install validated aviation data
         run: |
@@ -3449,10 +2981,6 @@ jobs:
           cp \
             /tmp/avimap-data/uk-reporting-points.geojson \
             data/uk-reporting-points.geojson
-
-      # ============================================================
-      # COMMIT
-      # ============================================================
 
       - name: Commit updated NATS aviation data
         run: |
