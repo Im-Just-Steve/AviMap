@@ -198,3 +198,15 @@ The included workflow is the corrected working version using
 `actions/checkout@v5`.
 
 After deployment, the PWA should report a non-zero UK airspace count.
+
+
+## v1.0.8 airspace colours
+
+Airspace display now follows the ICAO aeronautical-chart colour convention:
+Class A is red, while Classes B through G are blue. Prohibited, restricted
+and danger areas are also displayed in red to distinguish navigation-warning
+airspace. ICAO chart-harmonisation guidance supports the red/blue distinction,
+with B-G shown blue and Class A red. citeturn2search24turn0search23
+
+TMZ and RMZ are not ICAO airspace classes, so AviMap keeps them visually
+distinct rather than pretending they are part of the A-G class palette.

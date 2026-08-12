@@ -71,3 +71,58 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 #map .maplibregl-canvas {
   touch-action: pan-x pan-y pinch-zoom;
 }
+
+
+.airspace-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 92px;
+  z-index: 3;
+  min-width: 164px;
+  padding: 9px 10px;
+  border: 1px solid rgba(38, 54, 52, .18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .10);
+  font-size: 11px;
+  line-height: 1.35;
+  color: #243b38;
+  pointer-events: none;
+}
+
+.airspace-legend > div:not(.legend-title) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.legend-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: #52625f;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  flex: 0 0 18px;
+  border-radius: 2px;
+}
+
+.legend-red { background: #c62828; }
+.legend-blue { background: #245ca8; }
+.legend-magenta { background: #a52a83; }
+.legend-teal { background: #167c80; }
+
+@media (max-width: 600px) {
+  .airspace-legend {
+    left: 8px;
+    bottom: 78px;
+    min-width: 150px;
+    padding: 8px 9px;
+    font-size: 10px;
+  }
+}

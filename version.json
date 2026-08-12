@@ -1,6 +1,6 @@
 {
-  "version": "1.0.7",
+  "version": "1.0.8",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "PWA now consumes the successfully generated same-origin UK airspace dataset. OpenAIP API access remains server-side in GitHub Actions."
+  "releaseNotes": "Airspace colours now follow the ICAO charting convention: Class A red, Classes B-G blue, and prohibited/restricted/danger areas red. TMZ/RMZ remain distinct."
 }

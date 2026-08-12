@@ -155,8 +155,14 @@ function addReportingPoints() {
 }
 
 function addAirspace() {
-  const sourceData = normaliseGeoJson(dataState.airspace || { type: "FeatureCollection", features: [] });
-  map.addSource("avimap-airspace-source", { type: "geojson", data: sourceData });
+  const sourceData = normaliseGeoJson(
+    dataState.airspace || { type: "FeatureCollection", features: [] }
+  );
+
+  map.addSource("avimap-airspace-source", {
+    type: "geojson",
+    data: sourceData
+  });
 
   map.addLayer({
     id: "avimap-airspace-fill",
@@ -164,17 +170,14 @@ function addAirspace() {
     source: "avimap-airspace-source",
     paint: {
       "fill-color": [
-        "match", ["get", "type"],
-        "R", "#c43a3a",
-        "P", "#c43a3a",
-        "D", "#d08a1c",
-        "CTR", "#246d9c",
-        "TMA", "#4a65a1",
-        "TMZ", "#6f4e9b",
-        "RMZ", "#7c5a2c",
-        "#52736e"
+        "match", ["get", "avimapColor"],
+        "red", "#c62828",
+        "blue", "#245ca8",
+        "magenta", "#a52a83",
+        "teal", "#167c80",
+        "#5f6b70"
       ],
-      "fill-opacity": 0.16
+      "fill-opacity": 0.11
     }
   });
 
@@ -184,17 +187,21 @@ function addAirspace() {
     source: "avimap-airspace-source",
     paint: {
       "line-color": [
-        "match", ["get", "type"],
-        "R", "#c43a3a",
-        "P", "#c43a3a",
-        "D", "#d08a1c",
-        "CTR", "#246d9c",
-        "TMA", "#4a65a1",
-        "TMZ", "#6f4e9b",
-        "RMZ", "#7c5a2c",
-        "#52736e"
+        "match", ["get", "avimapColor"],
+        "red", "#c62828",
+        "blue", "#245ca8",
+        "magenta", "#a52a83",
+        "teal", "#167c80",
+        "#5f6b70"
       ],
-      "line-width": 1.4,
+      "line-width": [
+        "match", ["get", "avimapColor"],
+        "red", 1.8,
+        "blue", 1.6,
+        "magenta", 1.6,
+        "teal", 1.5,
+        1.4
+      ],
       "line-opacity": 0.95
     }
   });
@@ -210,29 +217,118 @@ function addAirspace() {
       "text-max-width": 10
     },
     paint: {
-      "text-color": "#4b5e5a",
+      "text-color": [
+        "match", ["get", "avimapColor"],
+        "red", "#8d1d1d",
+        "blue", "#17457e",
+        "magenta", "#76205f",
+        "teal", "#0d5b5e",
+        "#4b5e5a"
+      ],
       "text-halo-color": "#fff",
       "text-halo-width": 1
     }
   });
 }
 
+function classifyAirspaceColor(properties = {}) {
+  const rawType = [
+    properties.icaoClass,
+    properties.class,
+    properties.type,
+    properties.category,
+    properties.CATEGORY,
+    properties.designator,
+    properties.name
+  ]
+    .filter(v => v !== undefined && v !== null)
+    .map(v => String(v).trim().toUpperCase())
+    .join(" ");
+
+  // ICAO chart convention: Class A is red.
+  if (/\bCLASS[\s_-]*A\b|\bAIRSPACE[\s_-]*A\b/.test(rawType)) {
+    return "red";
+  }
+
+  // ICAO chart convention: Classes B, C, D, E, F and G are blue.
+  if (/\bCLASS[\s_-]*[BCDEFG]\b|\bAIRSPACE[\s_-]*[BCDEFG]\b/.test(rawType)) {
+    return "blue";
+  }
+
+  // UK/ICAO navigation-warning areas: prohibited, restricted and danger.
+  if (/\bPROHIBITED\b|\bRESTRICTED\b|\bDANGER\b|\b(^|[\s_-])[PRD][\s_-]*AREA\b/.test(rawType)) {
+    return "red";
+  }
+
+  // Common controlled-airspace names used in UK datasets.
+  if (
+    /\bCTR\b|\bCTA\b|\bTMA\b|\bCTZ\b|\bATZ\b|\bCONTROL ZONE\b|\bCONTROL AREA\b/.test(rawType)
+  ) {
+    return "blue";
+  }
+
+  // These are not ICAO classes; retain distinct chart-friendly colours.
+  if (/\bTMZ\b|\bTRANSPONDER MANDATORY\b/.test(rawType)) {
+    return "magenta";
+  }
+
+  if (/\bRMZ\b|\bRADIO MANDATORY\b/.test(rawType)) {
+    return "teal";
+  }
+
+  return "other";
+}
+
 function normaliseGeoJson(input) {
   if (!input) return { type: "FeatureCollection", features: [] };
+
   if (input.type === "FeatureCollection") {
     return {
       type: "FeatureCollection",
-      features: input.features.map((f, i) => ({
-        ...f,
-        properties: {
+      features: (input.features || []).filter(Boolean).map((f, i) => {
+        const properties = {
           ...(f.properties || {}),
-          name: f.properties?.name || f.properties?.AN || f.properties?.designator || `AREA ${i + 1}`,
-          type: f.properties?.type || f.properties?.category || f.properties?.CATEGORY || f.properties?.class || f.properties?.AC || ""
-        }
-      }))
+          name: f.properties?.name ||
+            f.properties?.AN ||
+            f.properties?.designator ||
+            `AREA ${i + 1}`,
+          type: f.properties?.type ||
+            f.properties?.category ||
+            f.properties?.CATEGORY ||
+            f.properties?.class ||
+            f.properties?.AC ||
+            ""
+        };
+
+        return {
+          ...f,
+          properties: {
+            ...properties,
+            avimapColor: classifyAirspaceColor(properties)
+          }
+        };
+      })
     };
   }
-  return { type: "FeatureCollection", features: [input] };
+
+  if (input.type === "Feature") {
+    const properties = {
+      ...(input.properties || {})
+    };
+
+    return {
+      type: "FeatureCollection",
+      features: [{
+        ...input,
+        properties: {
+          ...properties,
+          avimapColor: classifyAirspaceColor(properties)
+        }
+      }]
+    };
+  }
+
+  return { type: "FeatureCollection", features: [] };
 }
 
 
