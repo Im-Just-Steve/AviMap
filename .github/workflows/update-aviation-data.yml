@@ -1,102 +1,76 @@
-name: Inspect NATS dataset download mechanism
+name: Update UK aviation data
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "20 3 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  update:
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Inspect NATS dataset page
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+
+      # ============================================================
+      # FIND CURRENT NATS DATASET PAGE
+      # ============================================================
+
+      - name: Download NATS dataset page
         shell: bash
         run: |
           set -euo pipefail
 
-          URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
+          echo "=========================================="
+          echo "Downloading NATS Digital Datasets page"
+          echo "=========================================="
 
-          echo "=========================================="
-          echo "NATS DATASET PAGE INSPECTION"
-          echo "=========================================="
-          echo ""
-          echo "URL:"
-          echo "$URL"
-          echo ""
+          NATS_URL="https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html"
 
           curl \
             --fail \
             --silent \
             --show-error \
             --location \
+            --retry 5 \
+            --retry-delay 5 \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139 Safari/537.36" \
-            "$URL" \
+            "$NATS_URL" \
             --output /tmp/nats.html
 
-          echo "Downloaded page:"
+          test -s /tmp/nats.html
+
+          echo ""
+          echo "NATS page downloaded:"
           wc -c /tmp/nats.html
 
-          echo ""
-          echo "=========================================="
-          echo "AIP REFERENCES"
-          echo "=========================================="
 
-          grep \
-            -in \
-            -E \
-            'UK ICAO AIP|EG_AIP|AIP XML|AIP KML|download' \
-            /tmp/nats.html \
-            | head -200 \
-            || true
+      # ============================================================
+      # DISCOVER CURRENT ICAO AIP DATASET
+      # ============================================================
 
-          echo ""
-          echo "=========================================="
-          echo "FORM ELEMENTS"
-          echo "=========================================="
+      - name: Find current NATS UK ICAO AIP dataset
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          grep \
-            -in \
-            -E \
-            '<form|</form>|action=|method=' \
-            /tmp/nats.html \
-            | head -200 \
-            || true
-
-          echo ""
-          echo "=========================================="
-          echo "SCRIPT REFERENCES"
-          echo "=========================================="
-
-          grep \
-            -oiE \
-            '<script[^>]+src=["'\''][^"'\'']+["'\'']' \
-            /tmp/nats.html \
-            | head -200 \
-            || true
-
-          echo ""
-          echo "=========================================="
-          echo "DATA / DOWNLOAD ATTRIBUTES"
-          echo "=========================================="
-
-          grep \
-            -oiE \
-            '.{0,150}(download|dataset|aip|kml|xml|api).{0,300}' \
-            /tmp/nats.html \
-            | head -300 \
-            || true
-
-          echo ""
-          echo "=========================================="
-          echo "FULL AIP HTML CONTEXT"
-          echo "=========================================="
-
-          python3 - <<'PY'
-          from pathlib import Path
+          python3 <<'PY'
           import re
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.parse import urljoin
+
+          BASE_URL = "https://nats-uk.ead-it.com"
 
           html = Path(
               "/tmp/nats.html"
@@ -105,54 +79,981 @@ jobs:
               errors="replace"
           )
 
-          patterns = [
-              "UK ICAO AIP",
-              "EG_AIP",
-              "AIP XML",
-              "AIP KML",
-              "ICAO AIP"
-          ]
+          hrefs = re.findall(
+              r'href=["\']([^"\']+)["\']',
+              html,
+              flags=re.I
+          )
 
-          for pattern in patterns:
+          print("")
+          print("==========================================")
+          print("NATS AIP DATASET DISCOVERY")
+          print("==========================================")
+          print("")
+
+          print(
+              f"Total hrefs found: {len(hrefs)}"
+          )
+
+          # --------------------------------------------------------
+          # Find AIP XML ZIPs.
+          #
+          # Current NATS format:
+          #
+          # ICAO_AIP/EG_AIP_DS_YYYYMMDD_XML.zip
+          # --------------------------------------------------------
+
+          xml_datasets = []
+
+          for href in hrefs:
+
+              match = re.search(
+                  r'/ICAO_AIP/'
+                  r'EG_AIP_DS_(\d{8})_XML\.zip$',
+                  href,
+                  flags=re.I
+              )
+
+              if not match:
+                  continue
+
+              date_text = match.group(1)
+
+              try:
+
+                  effective_date = datetime.strptime(
+                      date_text,
+                      "%Y%m%d"
+                  ).date()
+
+              except ValueError:
+
+                  continue
+
+              xml_datasets.append(
+                  (
+                      effective_date,
+                      href
+                  )
+              )
+
+          # --------------------------------------------------------
+          # Find AIP KML ZIPs.
+          #
+          # NATS has used both:
+          #
+          # EG_AIS_DS_FULL_YYYYMMDD_KML.zip
+          #
+          # and:
+          #
+          # EG_AIP_DS_FULL_YYYYMMDD_KML.zip
+          #
+          # so we deliberately match the date and KML suffix.
+          # --------------------------------------------------------
+
+          kml_datasets = []
+
+          for href in hrefs:
+
+              match = re.search(
+                  r'/ICAO_AIP/'
+                  r'[^/]+_(\d{8})_KML\.zip$',
+                  href,
+                  flags=re.I
+              )
+
+              if not match:
+                  continue
+
+              date_text = match.group(1)
+
+              try:
+
+                  effective_date = datetime.strptime(
+                      date_text,
+                      "%Y%m%d"
+                  ).date()
+
+              except ValueError:
+
+                  continue
+
+              kml_datasets.append(
+                  (
+                      effective_date,
+                      href
+                  )
+              )
+
+          print("")
+          print("AIP XML datasets found:")
+          print("")
+
+          for effective_date, href in sorted(
+              xml_datasets,
+              reverse=True
+          ):
+
+              print(
+                  f"  {effective_date}  {href}"
+              )
+
+          print("")
+          print("AIP KML datasets found:")
+          print("")
+
+          for effective_date, href in sorted(
+              kml_datasets,
+              reverse=True
+          ):
+
+              print(
+                  f"  {effective_date}  {href}"
+              )
+
+          if not xml_datasets:
 
               print("")
-              print("=" * 70)
-              print(f"CONTEXT FOR: {pattern}")
-              print("=" * 70)
+              print(
+                  "ERROR: No NATS AIP XML ZIP datasets found."
+              )
 
-              found = False
+              print("")
+              print("ICAO_AIP references present on page:")
 
-              for match in re.finditer(
-                  pattern,
-                  html,
-                  flags=re.I
+              for href in hrefs:
+
+                  if "ICAO_AIP" in href.upper():
+
+                      print(
+                          f"  {href}"
+                      )
+
+              raise SystemExit(1)
+
+          if not kml_datasets:
+
+              print("")
+              print(
+                  "ERROR: No NATS AIP KML ZIP datasets found."
+              )
+
+              print("")
+              print("ICAO_AIP references present on page:")
+
+              for href in hrefs:
+
+                  if "ICAO_AIP" in href.upper():
+
+                      print(
+                          f"  {href}"
+                      )
+
+              raise SystemExit(1)
+
+          # --------------------------------------------------------
+          # Select latest non-future XML dataset.
+          # --------------------------------------------------------
+
+          today = datetime.now(
+              timezone.utc
+          ).date()
+
+          available_xml = [
+              item
+              for item in xml_datasets
+              if item[0] <= today
+          ]
+
+          if not available_xml:
+
+              raise SystemExit(
+                  "ERROR: No effective NATS AIP XML dataset found."
+              )
+
+          effective_date, xml_href = max(
+              available_xml,
+              key=lambda item: item[0]
+          )
+
+          # --------------------------------------------------------
+          # Select KML with matching date.
+          # --------------------------------------------------------
+
+          matching_kml = [
+              item
+              for item in kml_datasets
+              if item[0] == effective_date
+          ]
+
+          if not matching_kml:
+
+              print("")
+              print(
+                  f"ERROR: No KML dataset matches AIRAC "
+                  f"{effective_date}."
+              )
+
+              print("")
+              print("Available KML datasets:")
+
+              for item in sorted(
+                  kml_datasets,
+                  reverse=True
               ):
 
-                  found = True
-
-                  start = max(
-                      0,
-                      match.start() - 1500
-                  )
-
-                  end = min(
-                      len(html),
-                      match.end() + 3000
-                  )
-
                   print(
-                      html[start:end]
+                      f"  {item[0]}  {item[1]}"
                   )
 
-                  print("")
-                  print("-" * 70)
+              raise SystemExit(1)
 
-              if not found:
-                  print("NOT FOUND")
+          _, kml_href = matching_kml[0]
+
+          xml_url = urljoin(
+              BASE_URL,
+              xml_href
+          )
+
+          kml_url = urljoin(
+              BASE_URL,
+              kml_href
+          )
+
+          print("")
+          print("==========================================")
+          print("SELECTED NATS AIP DATASET")
+          print("==========================================")
+          print("")
+          print(
+              f"AIRAC / effective date: {effective_date}"
+          )
+          print("")
+          print("XML ZIP:")
+          print(xml_url)
+          print("")
+          print("KML ZIP:")
+          print(kml_url)
+          print("")
+
+          Path(
+              "/tmp/nats-aip-xml-url.txt"
+          ).write_text(
+              xml_url,
+              encoding="utf-8"
+          )
+
+          Path(
+              "/tmp/nats-aip-kml-url.txt"
+          ).write_text(
+              kml_url,
+              encoding="utf-8"
+          )
+
+          Path(
+              "/tmp/nats-aip-date.txt"
+          ).write_text(
+              str(effective_date),
+              encoding="utf-8"
+          )
 
           PY
 
+
+      # ============================================================
+      # DOWNLOAD NATS AIP XML + KML
+      # ============================================================
+
+      - name: Download NATS AIP XML and KML
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XML_URL=$(cat /tmp/nats-aip-xml-url.txt)
+          KML_URL=$(cat /tmp/nats-aip-kml-url.txt)
+
+          AIRAC=$(cat /tmp/nats-aip-date.txt)
+
           echo ""
           echo "=========================================="
-          echo "END INSPECTION"
+          echo "Downloading NATS AIP"
           echo "=========================================="
+          echo ""
+          echo "AIRAC:"
+          echo "$AIRAC"
+          echo ""
+          echo "XML:"
+          echo "$XML_URL"
+          echo ""
+          echo "KML:"
+          echo "$KML_URL"
+          echo ""
+
+          mkdir -p \
+            /tmp/nats-aip-xml \
+            /tmp/nats-aip-kml
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 5 \
+            --retry-delay 5 \
+            --user-agent "AviMap/1.0" \
+            "$XML_URL" \
+            --output /tmp/nats-aip.xml.zip
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 5 \
+            --retry-delay 5 \
+            --user-agent "AviMap/1.0" \
+            "$KML_URL" \
+            --output /tmp/nats-aip.kml.zip
+
+          test -s /tmp/nats-aip.xml.zip
+          test -s /tmp/nats-aip.kml.zip
+
+          echo ""
+          echo "Downloaded:"
+          ls -lh \
+            /tmp/nats-aip.xml.zip \
+            /tmp/nats-aip.kml.zip
+
+          echo ""
+          echo "Checking XML ZIP:"
+          unzip -t \
+            /tmp/nats-aip.xml.zip
+
+          echo ""
+          echo "Checking KML ZIP:"
+          unzip -t \
+            /tmp/nats-aip.kml.zip
+
+          echo ""
+          echo "Extracting XML:"
+          unzip \
+            -o \
+            /tmp/nats-aip.xml.zip \
+            -d /tmp/nats-aip-xml
+
+          echo ""
+          echo "Extracting KML:"
+          unzip \
+            -o \
+            /tmp/nats-aip.kml.zip \
+            -d /tmp/nats-aip-kml
+
+
+      # ============================================================
+      # FIND / DOWNLOAD NATS VRP DATASET
+      # ============================================================
+
+      - name: Find current NATS VRP dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import re
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.parse import urljoin
+
+          BASE_URL = "https://nats-uk.ead-it.com"
+
+          html = Path(
+              "/tmp/nats.html"
+          ).read_text(
+              encoding="utf-8",
+              errors="replace"
+          )
+
+          hrefs = re.findall(
+              r'href=["\']([^"\']+)["\']',
+              html,
+              flags=re.I
+          )
+
+          datasets = []
+
+          for href in hrefs:
+
+              match = re.search(
+                  r'/VRP/'
+                  r'EG_VRP_DS_AREA1_FULL_(\d{8})_CSV\.zip$',
+                  href,
+                  flags=re.I
+              )
+
+              if not match:
+                  continue
+
+              date_text = match.group(1)
+
+              try:
+
+                  effective_date = datetime.strptime(
+                      date_text,
+                      "%Y%m%d"
+                  ).date()
+
+              except ValueError:
+
+                  continue
+
+              datasets.append(
+                  (
+                      effective_date,
+                      href
+                  )
+              )
+
+          if not datasets:
+
+              print("")
+              print(
+                  "ERROR: No NATS VRP datasets found."
+              )
+
+              print("")
+              print("VRP references present on page:")
+
+              for href in hrefs:
+
+                  if "VRP" in href.upper():
+
+                      print(
+                          f"  {href}"
+                      )
+
+              raise SystemExit(1)
+
+          today = datetime.now(
+              timezone.utc
+          ).date()
+
+          available = [
+              item
+              for item in datasets
+              if item[0] <= today
+          ]
+
+          if not available:
+
+              raise SystemExit(
+                  "ERROR: No effective NATS VRP dataset found."
+              )
+
+          effective_date, href = max(
+              available,
+              key=lambda item: item[0]
+          )
+
+          url = urljoin(
+              BASE_URL,
+              href
+          )
+
+          print("")
+          print("==========================================")
+          print("SELECTED NATS VRP DATASET")
+          print("==========================================")
+          print("")
+          print(
+              f"Date: {effective_date}"
+          )
+          print("")
+          print(url)
+          print("")
+
+          Path(
+              "/tmp/nats-vrp-url.txt"
+          ).write_text(
+              url,
+              encoding="utf-8"
+          )
+
+          PY
+
+
+      - name: Download NATS VRP dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VRP_URL=$(cat /tmp/nats-vrp-url.txt)
+
+          echo ""
+          echo "=========================================="
+          echo "Downloading NATS VRP dataset"
+          echo "=========================================="
+          echo ""
+          echo "$VRP_URL"
+          echo ""
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 5 \
+            --retry-delay 5 \
+            --user-agent "AviMap/1.0" \
+            "$VRP_URL" \
+            --output /tmp/nats-vrp.zip
+
+          test -s /tmp/nats-vrp.zip
+
+          echo ""
+          echo "VRP ZIP:"
+          ls -lh /tmp/nats-vrp.zip
+
+          unzip -t \
+            /tmp/nats-vrp.zip
+
+          mkdir -p \
+            /tmp/nats-vrp
+
+          unzip \
+            -o \
+            /tmp/nats-vrp.zip \
+            -d /tmp/nats-vrp
+
+          echo ""
+          echo "Extracted VRP files:"
+          find \
+            /tmp/nats-vrp \
+            -type f \
+            -print
+
+
+      # ============================================================
+      # INSPECT NATS AIP CONTENTS
+      #
+      # This is deliberately diagnostic. We are not replacing
+      # uk-airspace.geojson until we have confirmed the structure
+      # of the NATS geometry.
+      # ============================================================
+
+      - name: Inspect NATS AIP contents
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "=========================================="
+          echo "NATS AIP CONTENTS"
+          echo "=========================================="
+          echo ""
+
+          echo "AIRAC:"
+          cat /tmp/nats-aip-date.txt
+
+          echo ""
+          echo "XML files:"
+          find \
+            /tmp/nats-aip-xml \
+            -type f \
+            -iname "*.xml" \
+            -print
+
+          echo ""
+          echo "KML files:"
+          find \
+            /tmp/nats-aip-kml \
+            -type f \
+            -iname "*.kml" \
+            -print
+
+          echo ""
+          echo "XML file sizes:"
+          find \
+            /tmp/nats-aip-xml \
+            -type f \
+            -iname "*.xml" \
+            -exec ls -lh {} \;
+
+          echo ""
+          echo "KML file sizes:"
+          find \
+            /tmp/nats-aip-kml \
+            -type f \
+            -iname "*.kml" \
+            -exec ls -lh {} \;
+
+          echo ""
+          echo "=========================================="
+          echo "KML PLACEMARK SUMMARY"
+          echo "=========================================="
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          files = list(
+              Path(
+                  "/tmp/nats-aip-kml"
+              ).rglob("*.kml")
+          )
+
+          if not files:
+
+              raise SystemExit(
+                  "ERROR: No KML files found."
+              )
+
+          total = 0
+
+          for path in files:
+
+              print("")
+              print(
+                  "=" * 70
+              )
+              print(
+                  f"KML FILE: {path}"
+              )
+              print(
+                  "=" * 70
+              )
+
+              text = path.read_text(
+                  encoding="utf-8",
+                  errors="replace"
+              )
+
+              placemarks = re.findall(
+                  r"<Placemark\b.*?</Placemark>",
+                  text,
+                  flags=re.I | re.S
+              )
+
+              total += len(
+                  placemarks
+              )
+
+              print(
+                  f"Placemark count: {len(placemarks)}"
+              )
+
+              for number, placemark in enumerate(
+                  placemarks[:10],
+                  1
+              ):
+
+                  print("")
+                  print(
+                      f"--- Placemark {number} ---"
+                  )
+
+                  # Print name.
+                  name = re.search(
+                      r"<name>\s*(.*?)\s*</name>",
+                      placemark,
+                      flags=re.I | re.S
+                  )
+
+                  if name:
+
+                      print(
+                          "NAME:",
+                          re.sub(
+                              r"\s+",
+                              " ",
+                              name.group(1)
+                          ).strip()
+                      )
+
+                  # Print ExtendedData.
+                  extended = re.search(
+                      r"<ExtendedData\b.*?</ExtendedData>",
+                      placemark,
+                      flags=re.I | re.S
+                  )
+
+                  if extended:
+
+                      print(
+                          "EXTENDEDDATA:"
+                      )
+
+                      print(
+                          re.sub(
+                              r"\s+",
+                              " ",
+                              extended.group(0)
+                          )[:2000]
+                      )
+
+                  # Print geometry tags.
+                  geometry = re.findall(
+                      r"<(Polygon|MultiGeometry|LineString|Point|coordinates)\b[^>]*>.*?</\1>",
+                      placemark,
+                      flags=re.I | re.S
+                  )
+
+                  if geometry:
+
+                      print(
+                          "GEOMETRY PRESENT: yes"
+                      )
+
+                  else:
+
+                      if re.search(
+                          r"<coordinates\b",
+                          placemark,
+                          flags=re.I
+                      ):
+
+                          print(
+                              "GEOMETRY PRESENT: yes"
+                          )
+
+                      else:
+
+                          print(
+                              "GEOMETRY PRESENT: no"
+                          )
+
+                  print(
+                      "RAW SAMPLE:"
+                  )
+
+                  print(
+                      placemark[:4000]
+                  )
+
+          print("")
+          print(
+              "TOTAL PLACEMARKS:",
+              total
+          )
+
+          PY
+
+
+      # ============================================================
+      # INSPECT NATS AIP XML
+      # ============================================================
+
+      - name: Inspect NATS AIP XML
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "=========================================="
+          echo "NATS AIP XML INSPECTION"
+          echo "=========================================="
+          echo ""
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          files = list(
+              Path(
+                  "/tmp/nats-aip-xml"
+              ).rglob("*.xml")
+          )
+
+          if not files:
+
+              raise SystemExit(
+                  "ERROR: No XML files found."
+              )
+
+          for path in files:
+
+              print("")
+              print(
+                  "=" * 70
+              )
+              print(
+                  f"XML FILE: {path}"
+              )
+              print(
+                  "=" * 70
+              )
+
+              text = path.read_text(
+                  encoding="utf-8",
+                  errors="replace"
+              )
+
+              print(
+                  f"Bytes: {len(text.encode('utf-8'))}"
+              )
+
+              print("")
+              print("Root / namespace information:")
+
+              root_match = re.search(
+                  r"<([A-Za-z0-9_:.-]+)(?:\s|>)",
+                  text
+              )
+
+              if root_match:
+
+                  print(
+                      root_match.group(1)
+                  )
+
+              print("")
+              print("Relevant airspace feature names:")
+
+              patterns = [
+                  r"Airspace",
+                  r"DesignatedPoint",
+                  r"Surface",
+                  r"AirspaceVolume",
+                  r"AirspaceTimeSlice",
+                  r"AirspaceGeometryComponent",
+                  r"horizontalProjection",
+                  r"Polygon",
+                  r"Circle",
+                  r"Class"
+              ]
+
+              found = set()
+
+              for pattern in patterns:
+
+                  if re.search(
+                      pattern,
+                      text,
+                      flags=re.I
+                  ):
+
+                      found.add(
+                          pattern
+                      )
+
+              for item in sorted(
+                  found
+              ):
+
+                  print(
+                      f"  {item}"
+                  )
+
+              print("")
+              print("First 5000 characters:")
+
+              print(
+                  text[:5000]
+              )
+
+          PY
+
+
+      # ============================================================
+      # VALIDATE VRP DATASET
+      # ============================================================
+
+      - name: Inspect NATS VRP CSV
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "=========================================="
+          echo "NATS VRP DATASET"
+          echo "=========================================="
+          echo ""
+
+          CSV_FILE=$(
+            find \
+              /tmp/nats-vrp \
+              -type f \
+              \( \
+                -iname "*.csv" \
+                -o \
+                -iname "*.CSV" \
+              \) \
+              | head -n 1
+          )
+
+          if [ -z "$CSV_FILE" ]; then
+
+            echo "ERROR: No CSV found in VRP ZIP."
+            exit 1
+
+          fi
+
+          echo "CSV:"
+          echo "$CSV_FILE"
+
+          echo ""
+          echo "Line count:"
+          wc -l "$CSV_FILE"
+
+          echo ""
+          echo "First 10 lines:"
+          head -n 10 "$CSV_FILE"
+
+          VRP_LINES=$(
+            tail -n +2 "$CSV_FILE" \
+            | grep -v '^[[:space:]]*$' \
+            | wc -l
+          )
+
+          echo ""
+          echo "VRP records:"
+          echo "$VRP_LINES"
+
+          if [ "$VRP_LINES" -eq 0 ]; then
+
+            echo "ERROR: NATS VRP dataset contains zero records."
+            exit 1
+
+          fi
+
+
+      # ============================================================
+      # FINAL STATUS
+      #
+      # IMPORTANT:
+      # This run intentionally does NOT commit anything yet.
+      # ============================================================
+
+      - name: Finish NATS data inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "=========================================="
+          echo "NATS DATA INSPECTION COMPLETE"
+          echo "=========================================="
+          echo ""
+
+          echo "AIRAC:"
+          cat /tmp/nats-aip-date.txt
+
+          echo ""
+          echo "The NATS AIP XML and KML datasets were"
+          echo "successfully discovered and downloaded."
+
+          echo ""
+          echo "The NATS VRP dataset was successfully"
+          echo "discovered and downloaded."
+
+          echo ""
+          echo "Existing AviMap GeoJSON has NOT been changed."
+
+          echo ""
+          echo "The next workflow revision will use the"
+          echo "confirmed NATS geometry structure to generate:"
+          echo ""
+          echo "  data/uk-airspace.geojson"
+          echo "  data/uk-reporting-points.geojson"
+          echo ""
+
+          echo "Inspection complete."
