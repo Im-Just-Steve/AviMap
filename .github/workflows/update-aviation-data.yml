@@ -13,79 +13,213 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
-      - name: Check OpenAIP export
-        run: |
-          set -e
-
-          echo "Checking OpenAIP UK airspace export..."
-
-          curl -I -L --retry 3 \
-            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.geojson" \
-            || true
-
-      - name: Download UK airspace
+      - name: Download UK airspace from OpenAIP
+        env:
+          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
         run: |
           set -e
 
           mkdir -p data
 
-          curl -L --retry 3 --fail \
-            "https://storage.googleapis.com/29f98e10-a489-4c82-ae5e-489dbcd4912f/gb_asp.json" \
-            -o data/uk-airspace.json
+          echo "Requesting UK airspace from OpenAIP..."
 
-          echo "Downloaded file:"
-          ls -lh data/uk-airspace.json
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
+            -H "Accept: application/json" \
+            "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=1" \
+            -o /tmp/openaip-page.json
 
-          echo "First 500 characters:"
-          head -c 500 data/uk-airspace.json
-          echo
+          echo "OpenAIP response received."
 
-      - name: Validate airspace data
+          node <<'NODE'
+          const fs = require("fs");
+
+          const file = "/tmp/openaip-page.json";
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          console.log("Response keys:", Object.keys(data));
+
+          if (!Array.isArray(data.items)) {
+            throw new Error("OpenAIP response does not contain an 'items' array.");
+          }
+
+          console.log("Airspaces on first page:", data.items.length);
+          console.log("Total airspaces:", data.totalCount);
+          console.log("Total pages:", data.totalPages);
+
+          if (data.items.length === 0) {
+            throw new Error("OpenAIP returned zero UK airspaces.");
+          }
+          NODE
+
+      - name: Download all UK airspace pages
+        env:
+          OPENAIP_API_KEY: ${{ secrets.OPENAIP_API_KEY }}
+        run: |
+          set -e
+
+          rm -f /tmp/all-airspaces.jsonl
+
+          PAGE=1
+
+          while true; do
+
+            echo "Downloading OpenAIP page ${PAGE}..."
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-delay 5 \
+              -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
+              -H "Accept: application/json" \
+              "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
+              -o "/tmp/page-${PAGE}.json"
+
+            node <<NODE
+            const fs = require("fs");
+
+            const file = "/tmp/page-${PAGE}.json";
+            const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+            if (!Array.isArray(data.items)) {
+              throw new Error("Page ${PAGE} does not contain an items array.");
+            }
+
+            console.log(
+              "Page ${PAGE}:",
+              data.items.length,
+              "airspaces"
+            );
+
+            fs.appendFileSync(
+              "/tmp/all-airspaces.jsonl",
+              data.items.map(x => JSON.stringify(x)).join("\\n") + "\\n"
+            );
+
+            if (${PAGE} >= Number(data.totalPages || 1)) {
+              process.exit(0);
+            }
+            NODE
+
+            PAGE=$((PAGE + 1))
+
+          done
+
+      - name: Convert OpenAIP airspace to GeoJSON
         run: |
           node <<'NODE'
           const fs = require("fs");
 
-          const file = "data/uk-airspace.json";
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          const input = "/tmp/all-airspaces.jsonl";
+          const output = "data/uk-airspace.geojson";
 
-          console.log("Top-level type:", data?.type);
-          console.log("Top-level keys:", Object.keys(data || {}));
+          const lines = fs.readFileSync(input, "utf8")
+            .split(/\r?\n/)
+            .filter(Boolean);
 
-          let count = 0;
+          const features = [];
 
-          if (data?.type === "FeatureCollection") {
-            count = Array.isArray(data.features) ? data.features.length : 0;
-          } else if (Array.isArray(data)) {
-            count = data.length;
-          } else if (Array.isArray(data?.items)) {
-            count = data.items.length;
-          } else if (Array.isArray(data?.data)) {
-            count = data.data.length;
-          } else if (Array.isArray(data?.airspaces)) {
-            count = data.airspaces.length;
+          for (const line of lines) {
+            const item = JSON.parse(line);
+
+            let geometry = item.geometry;
+
+            if (typeof geometry === "string") {
+              try {
+                geometry = JSON.parse(geometry);
+              } catch {
+                continue;
+              }
+            }
+
+            if (!geometry || !geometry.type || !geometry.coordinates) {
+              continue;
+            }
+
+            features.push({
+              type: "Feature",
+              id: item._id || item.id,
+
+              properties: {
+                id: item._id || item.id || "",
+                name: item.name || "Unknown airspace",
+                type: item.type ?? "",
+                icaoClass: item.icaoClass ?? "",
+                activity: item.activity ?? "",
+                upperLimit: item.upperLimit ?? null,
+                lowerLimit: item.lowerLimit ?? null,
+                country: item.country ?? "GB"
+              },
+
+              geometry
+            });
           }
 
-          console.log("Detected airspace records:", count);
-
-          if (count === 0) {
+          if (features.length === 0) {
             throw new Error(
-              "The downloaded file contains no recognised airspace records."
+              "Conversion produced zero GeoJSON features."
             );
           }
+
+          const geojson = {
+            type: "FeatureCollection",
+            features
+          };
+
+          fs.writeFileSync(
+            output,
+            JSON.stringify(geojson)
+          );
+
+          console.log(
+            `Created ${features.length} UK airspace features.`
+          );
           NODE
 
-      - name: Commit updated data
+      - name: Validate GeoJSON
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const file = "data/uk-airspace.geojson";
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          if (data.type !== "FeatureCollection") {
+            throw new Error("Airspace file is not a FeatureCollection.");
+          }
+
+          if (!Array.isArray(data.features)) {
+            throw new Error("Airspace FeatureCollection has no features array.");
+          }
+
+          if (data.features.length === 0) {
+            throw new Error("Airspace FeatureCollection contains zero features.");
+          }
+
+          console.log(
+            `Validated ${data.features.length} UK airspace features.`
+          );
+          NODE
+
+      - name: Commit updated airspace data
         run: |
           git config user.name "AviMap Data Bot"
           git config user.email "actions@users.noreply.github.com"
 
-          git add data/uk-airspace.json
+          git add data/uk-airspace.geojson
 
           if git diff --cached --quiet; then
-            echo "No data changes."
+            echo "No changes to UK airspace data."
           else
             git commit -m "Update UK airspace data"
             git push
