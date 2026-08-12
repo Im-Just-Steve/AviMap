@@ -36,10 +36,10 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .map-button:active{background:#e8eeec}
 .bottom-card{position:absolute;left:14px;right:14px;bottom:14px;min-height:64px;padding:10px 12px;display:flex;align-items:center;gap:24px;background:rgba(255,255,255,.96);border:1px solid rgba(60,76,73,.16);border-radius:10px;box-shadow:0 5px 18px rgba(25,42,39,.12);pointer-events:auto}
 .bottom-card div{display:flex;flex-direction:column;gap:3px}.bottom-card span{font-size:8px;color:#75817f;letter-spacing:.8px}.bottom-card b{font-size:12px}.secondary-button{margin-left:auto;border:1px solid #cbd5d2;background:#f4f7f6;color:#33413f;border-radius:7px;padding:9px 13px;font-size:10px;font-weight:750}
-.aircraft-marker{width:36px;height:36px;position:relative;pointer-events:none}
-.aircraft-icon{width:36px;height:36px;position:relative;filter:drop-shadow(0 2px 2px rgba(0,0,0,.2));transform-origin:18px 18px}
-.aircraft-icon:before{content:"";position:absolute;left:15px;top:1px;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:24px solid #183f3a}
-.aircraft-icon:after{content:"";position:absolute;left:2px;top:11px;width:30px;height:9px;background:#183f3a;border-radius:50%}
+.aircraft-marker{width:44px;height:44px;position:relative;pointer-events:none;display:flex;align-items:center;justify-content:center}
+.aircraft-icon{width:44px;height:44px;position:relative;filter:drop-shadow(0 2px 3px rgba(0,0,0,.28));transform-origin:22px 22px}
+.aircraft-icon:before{content:"";position:absolute;left:18px;top:1px;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:30px solid #183f3a}
+.aircraft-icon:after{content:"";position:absolute;left:3px;top:15px;width:38px;height:10px;background:#183f3a;border-radius:50%}
 .maplibregl-popup-content{font-family:inherit;border-radius:9px;padding:11px 13px;box-shadow:0 7px 25px rgba(0,0,0,.16);border:1px solid var(--line)}
 .popup-title{font-weight:800;font-size:13px}.popup-sub{font-size:11px;color:var(--muted);margin-top:3px}
 .sheet{position:fixed;inset:0;background:rgba(15,26,24,.25);z-index:50;display:flex;align-items:flex-end;justify-content:center}
@@ -128,3 +128,6 @@ button{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 }
 
 .legend-grey { background: #66706f; }
+
+.connection-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
+.connection-target{font-size:8px;color:#7b8885;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

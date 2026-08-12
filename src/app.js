@@ -22,6 +22,7 @@ const els = {
   speed: document.querySelector("#speedValue"),
   heading: document.querySelector("#headingValue"),
   toast: document.querySelector("#toast"),
+  connectionTarget: document.querySelector("#connectionTarget"),
   selectionSheet: document.querySelector("#selectionSheet"),
   selectionType: document.querySelector("#selectionType"),
   selectionTitle: document.querySelector("#selectionTitle"),
@@ -58,6 +59,11 @@ async function init() {
   const connector = new Connector({
     onState: setConnectionState,
     onPosition: updateAircraft,
+    onTarget: target => {
+      if (els.connectionTarget) {
+        els.connectionTarget.textContent = target;
+      }
+    },
     onError: error => console.warn("AviMap connector:", error)
   });
   connector.connect();
@@ -243,20 +249,58 @@ function updateRouteUI() {
 }
 
 function updateAircraft(data) {
-  state.aircraft = data;
-  setAircraft(data);
+  const lat = Number(data?.lat);
+  const lon = Number(data?.lon);
+  const altitude = Number(data?.altitude);
+  const groundspeed = Number(data?.groundspeed);
+  const heading = Number(data?.heading);
 
-  els.position.textContent = `${data.lat.toFixed(4)} / ${data.lon.toFixed(4)}`;
-  els.altitude.textContent = `${Math.round(data.altitude).toLocaleString()} FT`;
-  els.speed.textContent = `${Math.round(data.groundspeed)} KT`;
-  els.heading.textContent = `${Math.round(data.heading)}°`;
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon) ||
+    lat < -90 || lat > 90 ||
+    lon < -180 || lon > 180
+  ) {
+    console.warn("AviMap: invalid aircraft telemetry ignored", data);
+    return;
+  }
+
+  const aircraft = {
+    lat,
+    lon,
+    altitude: Number.isFinite(altitude) ? altitude : 0,
+    groundspeed: Number.isFinite(groundspeed) ? groundspeed : 0,
+    heading: Number.isFinite(heading) ? heading : 0
+  };
+
+  const wasReceiving = !!state.aircraft;
+  state.aircraft = aircraft;
+
+  if (setAircraft(aircraft) && !wasReceiving) {
+    centerOn(aircraft);
+    showToast("Aircraft position received.");
+  }
+
+  els.position.textContent = `${lat.toFixed(4)} / ${lon.toFixed(4)}`;
+  els.altitude.textContent = `${Math.round(aircraft.altitude).toLocaleString()} FT`;
+  els.speed.textContent = `${Math.round(aircraft.groundspeed)} KT`;
+  els.heading.textContent = `${Math.round(aircraft.heading)}°`;
 }
 
 function setConnectionState(status) {
   els.connection.classList.remove("connected", "error");
   if (status === "CONNECTED") els.connection.classList.add("connected");
   if (status === "UNAVAILABLE" || status === "DISCONNECTED") els.connection.classList.add("error");
-  els.connection.querySelector("span").textContent = status;
+  const labels = {
+    CONNECTING: "CONNECTING",
+    CONNECTED: "CONNECTED",
+    CONNECTED_WAITING: "CONNECTED · WAITING FOR TELEMETRY",
+    UNAVAILABLE: "COMPANION NOT FOUND",
+    DISCONNECTED: "DISCONNECTED",
+    CONNECTED: "CONNECTED"
+  };
+
+  els.connection.querySelector("span").textContent = labels[status] || status;
 }
 
 let toastTimer;

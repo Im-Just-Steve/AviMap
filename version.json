@@ -1,6 +1,6 @@
 {
-  "version": "1.0.12",
+  "version": "1.0.13",
   "name": "AviMap",
   "channel": "stable",
-  "releaseNotes": "Airspace styling now follows the explicit AviMap specification and uses OpenAIP type/icaoClass fields with explicit style metadata per feature."
+  "releaseNotes": "Automatic Companion discovery over the local network via avimap.local, with localhost fallback. Fixed aircraft marker creation and added telemetry diagnostics."
 }

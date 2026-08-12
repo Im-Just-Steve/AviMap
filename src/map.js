@@ -508,6 +508,18 @@ export function setLayerVisible(prefix, visible) {
   });
 }
 
+function createAircraftElement() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "aircraft-marker";
+  wrapper.setAttribute("aria-label", "Aircraft position");
+
+  const icon = document.createElement("div");
+  icon.className = "aircraft-icon";
+  wrapper.appendChild(icon);
+
+  return wrapper;
+}
+
 export function setAircraft(position) {
   const lon = Number(position?.lon);
   const lat = Number(position?.lat);

@@ -276,3 +276,19 @@ The renderer preserves the original OpenAIP `type` and `icaoClass` values and
 adds explicit `avimapColor`, `avimapDashed` and `avimapCategory` properties.
 P/R/D and the named special zones are evaluated before generic ICAO class
 classification.
+
+
+## v1.0.13 Companion discovery
+
+The PWA now automatically tries:
+1. `ws://127.0.0.1:49001/ws` for same-PC testing.
+2. `ws://avimap.local:49001/ws` for a Windows Companion on the same LAN.
+
+The Companion advertises `avimap.local` using mDNS.
+
+The browser may still enforce secure-page/local-network permissions depending
+on browser and device. If Chrome/iPadOS blocks the local WebSocket, the next
+step is to add a secure local transport rather than hard-coding an IP address.
+
+The aircraft marker was also fixed: the marker element is now explicitly
+created before MapLibre receives the first valid telemetry position.
