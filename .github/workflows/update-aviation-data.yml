@@ -39,26 +39,23 @@ jobs:
 
           echo "OpenAIP response received."
 
-          node <<'NODE'
-          const fs = require("fs");
+          echo "Response summary:"
+          jq '{
+            totalCount: .totalCount,
+            totalPages: .totalPages,
+            page: .page,
+            limit: .limit,
+            items: (.items | length)
+          }' /tmp/openaip-page.json
 
-          const file = "/tmp/openaip-page.json";
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          COUNT=$(jq '.items | length' /tmp/openaip-page.json)
 
-          console.log("Response keys:", Object.keys(data));
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: OpenAIP returned zero UK airspaces."
+            exit 1
+          fi
 
-          if (!Array.isArray(data.items)) {
-            throw new Error("OpenAIP response does not contain an 'items' array.");
-          }
-
-          console.log("Airspaces on first page:", data.items.length);
-          console.log("Total airspaces:", data.totalCount);
-          console.log("Total pages:", data.totalPages);
-
-          if (data.items.length === 0) {
-            throw new Error("OpenAIP returned zero UK airspaces.");
-          }
-          NODE
+          echo "First page contains $COUNT airspaces."
 
       - name: Download all UK airspace pages
         env:
@@ -68,52 +65,53 @@ jobs:
 
           rm -f /tmp/all-airspaces.jsonl
 
+          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page.json)
+
+          echo "OpenAIP reports $TOTAL_PAGES pages."
+
           PAGE=1
 
-          while true; do
+          while [ "$PAGE" -le "$TOTAL_PAGES" ]; do
 
-            echo "Downloading OpenAIP page ${PAGE}..."
+            echo ""
+            echo "Downloading page $PAGE of $TOTAL_PAGES..."
 
-            curl \
-              --fail \
-              --silent \
-              --show-error \
-              --retry 3 \
-              --retry-delay 5 \
-              -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
-              -H "Accept: application/json" \
-              "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
-              -o "/tmp/page-${PAGE}.json"
+            if [ "$PAGE" -eq 1 ]; then
+              cp /tmp/openaip-page.json "/tmp/page-${PAGE}.json"
+            else
+              curl \
+                --fail \
+                --silent \
+                --show-error \
+                --retry 3 \
+                --retry-delay 5 \
+                -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
+                -H "Accept: application/json" \
+                "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=${PAGE}" \
+                -o "/tmp/page-${PAGE}.json"
+            fi
 
-            node <<NODE
-            const fs = require("fs");
+            COUNT=$(jq '.items | length' "/tmp/page-${PAGE}.json")
 
-            const file = "/tmp/page-${PAGE}.json";
-            const data = JSON.parse(fs.readFileSync(file, "utf8"));
+            echo "Page $PAGE contains $COUNT airspaces."
 
-            if (!Array.isArray(data.items)) {
-              throw new Error("Page ${PAGE} does not contain an items array.");
-            }
-
-            console.log(
-              "Page ${PAGE}:",
-              data.items.length,
-              "airspaces"
-            );
-
-            fs.appendFileSync(
-              "/tmp/all-airspaces.jsonl",
-              data.items.map(x => JSON.stringify(x)).join("\\n") + "\\n"
-            );
-
-            if (${PAGE} >= Number(data.totalPages || 1)) {
-              process.exit(0);
-            }
-            NODE
+            jq -c '.items[]' "/tmp/page-${PAGE}.json" >> /tmp/all-airspaces.jsonl
 
             PAGE=$((PAGE + 1))
 
           done
+
+          TOTAL=$(wc -l < /tmp/all-airspaces.jsonl)
+
+          echo ""
+          echo "========================================="
+          echo "Total downloaded airspaces: $TOTAL"
+          echo "========================================="
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "ERROR: No airspace records were downloaded."
+            exit 1
+          fi
 
       - name: Convert OpenAIP airspace to GeoJSON
         run: |
@@ -126,6 +124,8 @@ jobs:
           const lines = fs.readFileSync(input, "utf8")
             .split(/\r?\n/)
             .filter(Boolean);
+
+          console.log(`Processing ${lines.length} OpenAIP airspace records...`);
 
           const features = [];
 
@@ -161,7 +161,7 @@ jobs:
                 country: item.country ?? "GB"
               },
 
-              geometry
+              geometry: geometry
             });
           }
 
@@ -173,7 +173,7 @@ jobs:
 
           const geojson = {
             type: "FeatureCollection",
-            features
+            features: features
           };
 
           fs.writeFileSync(
@@ -182,37 +182,38 @@ jobs:
           );
 
           console.log(
-            `Created ${features.length} UK airspace features.`
+            `Created ${features.length} GeoJSON airspace features.`
           );
           NODE
 
       - name: Validate GeoJSON
         run: |
-          node <<'NODE'
-          const fs = require("fs");
+          set -e
 
-          const file = "data/uk-airspace.geojson";
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          echo "Validating generated GeoJSON..."
 
-          if (data.type !== "FeatureCollection") {
-            throw new Error("Airspace file is not a FeatureCollection.");
-          }
+          TYPE=$(jq -r '.type' data/uk-airspace.geojson)
+          COUNT=$(jq '.features | length' data/uk-airspace.geojson)
 
-          if (!Array.isArray(data.features)) {
-            throw new Error("Airspace FeatureCollection has no features array.");
-          }
+          echo "GeoJSON type: $TYPE"
+          echo "GeoJSON features: $COUNT"
 
-          if (data.features.length === 0) {
-            throw new Error("Airspace FeatureCollection contains zero features.");
-          }
+          if [ "$TYPE" != "FeatureCollection" ]; then
+            echo "ERROR: Invalid GeoJSON type."
+            exit 1
+          fi
 
-          console.log(
-            `Validated ${data.features.length} UK airspace features.`
-          );
-          NODE
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: GeoJSON contains zero features."
+            exit 1
+          fi
+
+          echo "GeoJSON validation successful."
 
       - name: Commit updated airspace data
         run: |
+          set -e
+
           git config user.name "AviMap Data Bot"
           git config user.email "actions@users.noreply.github.com"
 
