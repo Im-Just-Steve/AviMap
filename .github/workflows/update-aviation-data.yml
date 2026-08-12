@@ -13,8 +13,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ------------------------------------------------------------
+      # CHECKOUT
+      # ------------------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      # ------------------------------------------------------------
+      # OPENAIP AIRSPACE
+      # ------------------------------------------------------------
 
       - name: Download UK airspace from OpenAIP
         env:
@@ -24,7 +33,9 @@ jobs:
 
           mkdir -p data
 
-          echo "Requesting UK airspace from OpenAIP..."
+          echo "=========================================="
+          echo "Downloading UK airspace from OpenAIP"
+          echo "=========================================="
 
           curl \
             --fail \
@@ -35,27 +46,24 @@ jobs:
             -H "x-openaip-api-key: ${OPENAIP_API_KEY}" \
             -H "Accept: application/json" \
             "https://api.core.openaip.net/api/airspaces?country=GB&approved=true&limit=100&page=1" \
-            -o /tmp/openaip-page.json
+            -o /tmp/openaip-page-1.json
 
-          echo "OpenAIP response received."
+          echo ""
+          echo "OpenAIP response:"
 
-          echo "Response summary:"
           jq '{
             totalCount: .totalCount,
             totalPages: .totalPages,
             page: .page,
-            limit: .limit,
             items: (.items | length)
-          }' /tmp/openaip-page.json
+          }' /tmp/openaip-page-1.json
 
-          COUNT=$(jq '.items | length' /tmp/openaip-page.json)
+          COUNT=$(jq '.items | length' /tmp/openaip-page-1.json)
 
           if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: OpenAIP returned zero UK airspaces."
+            echo "ERROR: OpenAIP returned zero airspaces."
             exit 1
           fi
-
-          echo "First page contains $COUNT airspaces."
 
       - name: Download all UK airspace pages
         env:
@@ -65,19 +73,20 @@ jobs:
 
           rm -f /tmp/all-airspaces.jsonl
 
-          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page.json)
+          TOTAL_PAGES=$(jq -r '.totalPages // 1' /tmp/openaip-page-1.json)
 
-          echo "OpenAIP reports $TOTAL_PAGES pages."
+          echo ""
+          echo "Total airspace pages: $TOTAL_PAGES"
+          echo ""
 
           PAGE=1
 
           while [ "$PAGE" -le "$TOTAL_PAGES" ]; do
 
-            echo ""
-            echo "Downloading page $PAGE of $TOTAL_PAGES..."
+            echo "Downloading airspace page $PAGE of $TOTAL_PAGES..."
 
             if [ "$PAGE" -eq 1 ]; then
-              cp /tmp/openaip-page.json "/tmp/page-${PAGE}.json"
+              cp /tmp/openaip-page-1.json "/tmp/page-${PAGE}.json"
             else
               curl \
                 --fail \
@@ -95,7 +104,8 @@ jobs:
 
             echo "Page $PAGE contains $COUNT airspaces."
 
-            jq -c '.items[]' "/tmp/page-${PAGE}.json" >> /tmp/all-airspaces.jsonl
+            jq -c '.items[]' "/tmp/page-${PAGE}.json" \
+              >> /tmp/all-airspaces.jsonl
 
             PAGE=$((PAGE + 1))
 
@@ -104,32 +114,38 @@ jobs:
           TOTAL=$(wc -l < /tmp/all-airspaces.jsonl)
 
           echo ""
-          echo "========================================="
-          echo "Total downloaded airspaces: $TOTAL"
-          echo "========================================="
+          echo "=========================================="
+          echo "TOTAL AIRSPACES DOWNLOADED: $TOTAL"
+          echo "=========================================="
 
           if [ "$TOTAL" -eq 0 ]; then
-            echo "ERROR: No airspace records were downloaded."
+            echo "ERROR: No airspaces downloaded."
             exit 1
           fi
 
-      - name: Convert OpenAIP airspace to GeoJSON
+      # ------------------------------------------------------------
+      # CONVERT AIRSPACE TO GEOJSON
+      # ------------------------------------------------------------
+
+      - name: Convert airspace to GeoJSON
         run: |
+          set -e
+
           node <<'NODE'
+
           const fs = require("fs");
 
-          const input = "/tmp/all-airspaces.jsonl";
-          const output = "data/uk-airspace.geojson";
-
-          const lines = fs.readFileSync(input, "utf8")
-            .split(/\r?\n/)
-            .filter(Boolean);
-
-          console.log(`Processing ${lines.length} OpenAIP airspace records...`);
+          const lines = fs.readFileSync(
+            "/tmp/all-airspaces.jsonl",
+            "utf8"
+          )
+          .split(/\r?\n/)
+          .filter(Boolean);
 
           const features = [];
 
           for (const line of lines) {
+
             const item = JSON.parse(line);
 
             let geometry = item.geometry;
@@ -142,12 +158,17 @@ jobs:
               }
             }
 
-            if (!geometry || !geometry.type || !geometry.coordinates) {
+            if (
+              !geometry ||
+              !geometry.type ||
+              !geometry.coordinates
+            ) {
               continue;
             }
 
             features.push({
               type: "Feature",
+
               id: item._id || item.id,
 
               properties: {
@@ -161,67 +182,540 @@ jobs:
                 country: item.country ?? "GB"
               },
 
-              geometry: geometry
+              geometry
             });
           }
 
-          if (features.length === 0) {
+          if (!features.length) {
             throw new Error(
-              "Conversion produced zero GeoJSON features."
+              "Airspace conversion produced zero features."
             );
           }
 
-          const geojson = {
-            type: "FeatureCollection",
-            features: features
-          };
-
           fs.writeFileSync(
-            output,
-            JSON.stringify(geojson)
+            "data/uk-airspace.geojson",
+
+            JSON.stringify({
+              type: "FeatureCollection",
+              features
+            })
           );
 
           console.log(
-            `Created ${features.length} GeoJSON airspace features.`
+            `Created ${features.length} airspace features.`
           );
+
           NODE
 
-      - name: Validate GeoJSON
+      # ------------------------------------------------------------
+      # NATS VRPs
+      # ------------------------------------------------------------
+
+      - name: Find current NATS VRP dataset
         run: |
           set -e
 
-          echo "Validating generated GeoJSON..."
+          echo "=========================================="
+          echo "Finding current NATS UK VRP dataset"
+          echo "=========================================="
 
-          TYPE=$(jq -r '.type' data/uk-airspace.geojson)
-          COUNT=$(jq '.features | length' data/uk-airspace.geojson)
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html" \
+            -o /tmp/nats.html
 
-          echo "GeoJSON type: $TYPE"
-          echo "GeoJSON features: $COUNT"
+          python3 <<'PY'
 
-          if [ "$TYPE" != "FeatureCollection" ]; then
-            echo "ERROR: Invalid GeoJSON type."
+          import re
+          from urllib.parse import urljoin
+
+          html = open(
+              "/tmp/nats.html",
+              encoding="utf-8",
+              errors="replace"
+          ).read()
+
+          hrefs = re.findall(
+              r'href=["\']([^"\']+)["\']',
+              html,
+              flags=re.I
+          )
+
+          candidates = []
+
+          for href in hrefs:
+
+              if re.search(
+                  r'EG_VRP_DS_AREA1_FULL_[^"\']+\.CSV$',
+                  href,
+                  flags=re.I
+              ):
+                  candidates.append(href)
+
+          if not candidates:
+
+              print("Could not find NATS VRP CSV.")
+
+              print("")
+              print("Links found containing VRP:")
+
+              for href in hrefs:
+
+                  if "VRP" in href.upper():
+
+                      print(href)
+
+              raise SystemExit(1)
+
+          url = urljoin(
+              "https://nats-uk.ead-it.com/cms-nats/opencms/en/Publications/digital-datasets/index.html",
+              candidates[0]
+          )
+
+          print("")
+          print("NATS VRP URL:")
+          print(url)
+          print("")
+
+          open(
+              "/tmp/nats-vrp-url.txt",
+              "w"
+          ).write(url)
+
+          PY
+
+      - name: Download NATS VRPs
+        run: |
+          set -e
+
+          VRP_URL=$(cat /tmp/nats-vrp-url.txt)
+
+          echo "=========================================="
+          echo "Downloading NATS VRP dataset"
+          echo "=========================================="
+
+          echo "$VRP_URL"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-delay 5 \
+            -L \
+            "$VRP_URL" \
+            -o /tmp/uk-vrps.csv
+
+          if [ ! -s /tmp/uk-vrps.csv ]; then
+            echo "ERROR: NATS VRP CSV is empty."
             exit 1
           fi
 
-          if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: GeoJSON contains zero features."
+          echo ""
+          echo "Downloaded VRP CSV:"
+          wc -c /tmp/uk-vrps.csv
+
+          echo ""
+          echo "First 10 lines:"
+          head -n 10 /tmp/uk-vrps.csv
+
+      # ------------------------------------------------------------
+      # CONVERT VRPS
+      # ------------------------------------------------------------
+
+      - name: Convert NATS VRPs to GeoJSON
+        run: |
+          set -e
+
+          python3 <<'PY'
+
+          import csv
+          import json
+          import re
+
+          from pathlib import Path
+
+          raw = Path(
+              "/tmp/uk-vrps.csv"
+          ).read_text(
+              encoding="utf-8-sig",
+              errors="replace"
+          )
+
+          try:
+
+              dialect = csv.Sniffer().sniff(
+                  raw[:8192],
+                  delimiters=",;\t"
+              )
+
+          except csv.Error:
+
+              dialect = csv.excel
+
+          rows = list(
+              csv.DictReader(
+                  raw.splitlines(),
+                  dialect=dialect
+              )
+          )
+
+          print(
+              f"CSV records: {len(rows)}"
+          )
+
+          if not rows:
+
+              raise SystemExit(
+                  "NATS VRP CSV contains no records."
+              )
+
+          fields = list(rows[0].keys())
+
+          print("")
+          print("CSV fields:")
+
+          for field in fields:
+              print(
+                  f"  {field}"
+              )
+
+          def norm(value):
+
+              return re.sub(
+                  r"[^a-z0-9]",
+                  "",
+                  str(value).strip().lower()
+              )
+
+          normalised = {
+              norm(field): field
+              for field in fields
+              if field
+          }
+
+          def find_field(*names):
+
+              for name in names:
+
+                  key = norm(name)
+
+                  if key in normalised:
+
+                      return normalised[key]
+
+              for key, original in normalised.items():
+
+                  for name in names:
+
+                      n = norm(name)
+
+                      if n in key or key in n:
+
+                          return original
+
+              return None
+
+          name_field = find_field(
+              "VRP Name",
+              "VRP",
+              "Name",
+              "Designator",
+              "Identifier",
+              "Point Name",
+              "Point"
+          )
+
+          lat_field = find_field(
+              "Latitude",
+              "Lat",
+              "Latitude DD",
+              "Latitude Decimal"
+          )
+
+          lon_field = find_field(
+              "Longitude",
+              "Lon",
+              "Long",
+              "Longitude DD",
+              "Longitude Decimal"
+          )
+
+          print("")
+          print("Detected fields:")
+          print("  Name:", name_field)
+          print("  Latitude:", lat_field)
+          print("  Longitude:", lon_field)
+          print("")
+
+          if not lat_field or not lon_field:
+
+              raise SystemExit(
+                  "Could not identify latitude/longitude fields."
+              )
+
+          def parse_coord(value, latitude):
+
+              if value is None:
+                  return None
+
+              text = str(value).strip()
+
+              if not text:
+                  return None
+
+              # Decimal degrees
+
+              try:
+
+                  number = float(
+                      text.replace(",", ".")
+                  )
+
+                  limit = 90 if latitude else 180
+
+                  if -limit <= number <= limit:
+
+                      return number
+
+              except ValueError:
+
+                  pass
+
+              # DMS / DDM
+
+              upper = (
+                  text.upper()
+                  .replace("°", " ")
+                  .replace("'", " ")
+                  .replace('"', " ")
+              )
+
+              direction = None
+
+              if upper[-1:] in "NSEW":
+
+                  direction = upper[-1]
+                  upper = upper[:-1]
+
+              numbers = re.findall(
+                  r"[-+]?\d+(?:[.,]\d+)?",
+                  upper
+              )
+
+              if not numbers:
+
+                  return None
+
+              values = [
+                  float(
+                      n.replace(",", ".")
+                  )
+                  for n in numbers
+              ]
+
+              result = abs(values[0])
+
+              if len(values) > 1:
+
+                  result += abs(values[1]) / 60
+
+              if len(values) > 2:
+
+                  result += abs(values[2]) / 3600
+
+              if direction in ("S", "W"):
+
+                  result = -result
+
+              limit = 90 if latitude else 180
+
+              if result < -limit or result > limit:
+
+                  return None
+
+              return result
+
+          features = []
+
+          for index, row in enumerate(
+              rows,
+              1
+          ):
+
+              latitude = parse_coord(
+                  row.get(lat_field),
+                  True
+              )
+
+              longitude = parse_coord(
+                  row.get(lon_field),
+                  False
+              )
+
+              if latitude is None or longitude is None:
+
+                  continue
+
+              if name_field:
+
+                  name = str(
+                      row.get(name_field, "")
+                  ).strip()
+
+              else:
+
+                  name = ""
+
+              if not name:
+
+                  name = f"VRP {index}"
+
+              properties = {
+                  str(k).strip(): v
+                  for k, v in row.items()
+                  if k
+              }
+
+              properties["name"] = name
+              properties["ident"] = name
+
+              features.append({
+
+                  "type": "Feature",
+
+                  "properties": properties,
+
+                  "geometry": {
+
+                      "type": "Point",
+
+                      "coordinates": [
+                          longitude,
+                          latitude
+                      ]
+
+                  }
+
+              })
+
+          print(
+              f"Valid VRPs: {len(features)}"
+          )
+
+          if not features:
+
+              raise SystemExit(
+                  "VRP conversion produced zero valid points."
+              )
+
+          Path(
+              "data/uk-reporting-points.geojson"
+          ).write_text(
+
+              json.dumps({
+
+                  "type": "FeatureCollection",
+
+                  "features": features
+
+              }),
+
+              encoding="utf-8"
+          )
+
+          PY
+
+      # ------------------------------------------------------------
+      # VALIDATE
+      # ------------------------------------------------------------
+
+      - name: Validate generated data
+        run: |
+          set -e
+
+          AIRSPACE_COUNT=$(
+            jq '.features | length' \
+            data/uk-airspace.geojson
+          )
+
+          VRP_COUNT=$(
+            jq '.features | length' \
+            data/uk-reporting-points.geojson
+          )
+
+          echo ""
+          echo "=========================================="
+          echo "FINAL DATA COUNTS"
+          echo "=========================================="
+          echo ""
+          echo "Airspaces : $AIRSPACE_COUNT"
+          echo "VRPs      : $VRP_COUNT"
+          echo ""
+
+          if [ "$AIRSPACE_COUNT" -eq 0 ]; then
+            echo "ERROR: zero airspaces."
             exit 1
           fi
 
-          echo "GeoJSON validation successful."
+          if [ "$VRP_COUNT" -eq 0 ]; then
+            echo "ERROR: zero VRPs."
+            exit 1
+          fi
 
-      - name: Commit updated airspace data
+      # ------------------------------------------------------------
+      # COMMIT
+      # ------------------------------------------------------------
+
+      - name: Commit updated aviation data
         run: |
           set -e
 
           git config user.name "AviMap Data Bot"
-          git config user.email "actions@users.noreply.github.com"
 
-          git add data/uk-airspace.geojson
+          git config user.email \
+            "actions@users.noreply.github.com"
+
+          echo ""
+          echo "Checking for changes..."
+
+          git status --short
+
+          git add \
+            data/uk-airspace.geojson \
+            data/uk-reporting-points.geojson
 
           if git diff --cached --quiet; then
-            echo "No changes to UK airspace data."
+
+            echo ""
+            echo "=========================================="
+            echo "NO DATA CHANGES DETECTED"
+            echo "=========================================="
+            echo ""
+            echo "The downloaded datasets are identical"
+            echo "to the versions already in Git."
+            echo ""
+
           else
-            git commit -m "Update UK airspace data"
+
+            echo ""
+            echo "=========================================="
+            echo "DATA CHANGES DETECTED"
+            echo "=========================================="
+            echo ""
+
+            git diff --cached --stat
+
+            git commit \
+              -m "Update UK aviation data"
+
             git push
+
+            echo ""
+            echo "Aviation data committed successfully."
+
           fi
