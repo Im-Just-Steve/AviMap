@@ -3727,11 +3727,6 @@ jobs:
 
 
 
-            exit 1
-
-          fi
-
-
           if [ "${VRP_COUNT}" -eq 0 ]; then
 
             echo "ERROR: No NATS reporting points."
