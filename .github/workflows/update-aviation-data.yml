@@ -4029,6 +4029,165 @@ jobs:
               ]
 
 
+          def asymmetric_stub_polygon(
+              lat,
+              lon,
+              bearing_deg,
+              length_nm,
+              north_width_nm,
+              south_width_nm,
+              radius_nm,
+          ):
+              """
+              Build a stub whose centreline follows the published
+              runway heading but whose lateral width is asymmetric.
+
+              Used for the Mildenhall Note 4 geometry: the normal
+              2 NM north side is retained and the southern side is
+              extended to 5 NM from the extended centre-line.
+
+              The inner edge is still placed where the rectangle
+              intersects the MATZ circle.
+              """
+
+              half_span = max(
+                  north_width_nm,
+                  south_width_nm,
+              )
+
+              if radius_nm <= 0:
+                  raise ValueError(
+                      "MATZ radius must be positive"
+                  )
+
+              # The centreline intersection with the circle is
+              # independent of the asymmetric lateral widths.  To
+              # guarantee a physical join, use the furthest lateral
+              # edge when locating the inner corners.
+              # If the south side is 5 NM, the circle intersection
+              # is sqrt(r^2 - 5^2) only where that edge actually
+              # meets the circle.  For the 5 NM Mildenhall circle
+              # this is tangent at the south-side edge, so the
+              # published non-standard extension is constructed from
+              # the circle's southern tangent region.
+              #
+              # For the actual Mildenhall geometry we use a 5 NM
+              # south-side extension and 2 NM north side.  The inner
+              # edge is therefore allowed to begin at the circle
+              # boundary on each side rather than forcing a single
+              # perpendicular start line.
+              inner = math.sqrt(
+                  max(
+                      radius_nm * radius_nm
+                      - north_width_nm * north_width_nm,
+                      0.0,
+                  )
+              )
+
+              start_lat, start_lon = destination(
+                  lat,
+                  lon,
+                  bearing_deg,
+                  inner,
+              )
+
+              end_lat, end_lon = destination(
+                  lat,
+                  lon,
+                  bearing_deg,
+                  inner + length_nm,
+              )
+
+              # Determine which side of the runway heading is south.
+              # For 103° the right side is south; for 283° the left
+              # side is south.  The sign is determined geometrically
+              # from the local bearing vectors.
+              def side_lat(
+                  base_lat,
+                  base_lon,
+                  side_bearing,
+                  width,
+              ):
+                  p_lat, p_lon = destination(
+                      base_lat,
+                      base_lon,
+                      side_bearing,
+                      width,
+                  )
+                  return p_lat, p_lon
+
+              # Build both candidate sides, then assign the southern
+              # side by latitude at the inner point.
+              candidates_start = [
+                  (
+                      side_lat(
+                          start_lat,
+                          start_lon,
+                          bearing_deg - 90.0,
+                          north_width_nm,
+                      ),
+                      "left",
+                  ),
+                  (
+                      side_lat(
+                          start_lat,
+                          start_lon,
+                          bearing_deg + 90.0,
+                          south_width_nm,
+                      ),
+                      "right",
+                  ),
+              ]
+
+              left_start = side_lat(
+                  start_lat,
+                  start_lon,
+                  bearing_deg - 90.0,
+                  north_width_nm,
+              )
+              right_start = side_lat(
+                  start_lat,
+                  start_lon,
+                  bearing_deg + 90.0,
+                  south_width_nm,
+              )
+
+              left_end = side_lat(
+                  end_lat,
+                  end_lon,
+                  bearing_deg - 90.0,
+                  north_width_nm,
+              )
+              right_end = side_lat(
+                  end_lat,
+                  end_lon,
+                  bearing_deg + 90.0,
+                  south_width_nm,
+              )
+
+              # The side that is physically south gets the 5 NM
+              # offset.  For the reciprocal runway heading the
+              # left/right relationship reverses.
+              if left_start[0] < right_start[0]:
+                  south_start = left_start
+                  north_start = right_start
+                  south_end = left_end
+                  north_end = right_end
+              else:
+                  south_start = right_start
+                  north_start = left_start
+                  south_end = right_end
+                  north_end = left_end
+
+              return [
+                  [north_start[1], north_start[0]],
+                  [south_start[1], south_start[0]],
+                  [south_end[1], south_end[0]],
+                  [north_end[1], north_end[0]],
+                  [north_start[1], north_start[0]],
+              ]
+
+
           MATZ =           [{'name': 'Barkston Heath',
             'lat': 52.9629833,
             'lon': -0.5603222,
@@ -4075,14 +4234,14 @@ jobs:
             'headings': [268],
             'controlling': 'Brize Norton',
             'frequency': '119.000',
-            'notes': 'NATS Note 1: limited activation.'},
+            'notes': 'NATS Note 1: aerodrome open on very limited occasions when advised by NOTAM or Supplement.'},
            {'name': 'Kinloss',
             'lat': 57.6494083,
             'lon': -3.5605889,
             'headings': [],
             'controlling': 'Lossiemouth',
             'frequency': '119.575',
-            'notes': 'NATS Note 11.'},
+            'notes': 'NATS Note 11: if Lossiemouth is closed, MATZ penetration service is provided by Kinloss Tower on 122.100 MHz (alternate 119.575 MHz).'},
            {'name': 'Lakenheath',
             'lat': 52.4094028,
             'lon': 0.5610111,
@@ -4090,7 +4249,7 @@ jobs:
             'controlling': 'Lakenheath',
             'frequency': '128.900',
             'special': 'lakenheath',
-            'notes': 'NATS Notes 2 and 3. Non-standard north-easterly stub.'},
+            'notes': 'NATS Notes 2 and 3. Non-standard north-easterly stub SFC to 3000 FT AAL. Helicopters operating in EG D208 must notify Lakenheath ATC before penetrating the CMATZ; no restrictions within the overlapping north-easterly stub portion if at or below 800 FT AMSL.'},
            {'name': 'Leeming',
             'lat': 54.2925,
             'lon': -1.5352778,
@@ -4138,7 +4297,8 @@ jobs:
             'controlling': 'Lakenheath',
             'frequency': '128.900',
             'special': 'mildenhall',
-            'notes': 'NATS Notes 4 and 5. CMATZ with Lakenheath.'},
+            'special': 'mildenhall',
+            'notes': 'NATS Notes 4 and 5. Non-standard extension to both stubs: 5 NM south of extended centre-lines. 5 NM circles joined by a straight line at their most easterly points; CMATZ with Lakenheath.'},
            {'name': 'Mona',
             'lat': 53.2593,
             'lon': -4.3740111,
@@ -4151,7 +4311,7 @@ jobs:
             'headings': [93],
             'controlling': 'Odiham',
             'frequency': '131.300',
-            'notes': 'NATS Note 10.'},
+            'notes': 'NATS Note 10: Odiham Approach, except weekends and public holidays, when the task may be carried out by Farnborough on 125.250 MHz.'},
            {'name': 'Predannack',
             'lat': 50.0016667,
             'lon': -5.2319444,
@@ -4164,7 +4324,7 @@ jobs:
             'headings': [41],
             'controlling': 'Waddington',
             'frequency': '119.500',
-            'notes': 'NATS Note 8: 5 NM portion coincident with EGR313.'},
+            'notes': 'NATS Note 8: 5 NM radius portion of MATZ coincident with EG R313.'},
            {'name': 'Shawbury',
             'lat': 52.7936111,
             'lon': -2.6677778,
@@ -4177,7 +4337,7 @@ jobs:
             'headings': [],
             'controlling': 'Shawbury',
             'frequency': '133.150',
-            'notes': 'NATS Note 12.'},
+            'notes': 'NATS Note 12: weekends and out of hours, contact Ternhill Radio for Traffic Information on 122.100 MHz.'},
            {'name': 'Topcliffe',
             'lat': 54.2072472,
             'lon': -1.3805306,
@@ -4216,7 +4376,7 @@ jobs:
             'headings': [253, 73],
             'controlling': 'Wittering',
             'frequency': '119.675',
-            'notes': 'NATS Note 13.'},
+            'notes': 'NATS Note 13: civilian traffic joining Wittering will be given Wittering Tower 127.975 MHz; do not free-call Wittering Tower for zone crossing service.'},
            {'name': 'Yeovilton',
             'lat': 51.0082694,
             'lon': -2.6454917,
@@ -4286,7 +4446,14 @@ jobs:
               )
 
 
-              # Stubs start at the circle radius, NOT at the centre.
+              # Mildenhall Note 4: both stubs have a non-standard
+              # southern extension to 5 NM from the extended
+              # centre-line.  The normal northern side remains 2 NM.
+              #
+              # Note 5 is applied later to the two 5 NM circles only:
+              # their most easterly points are joined by a straight
+              # line.  The stubs themselves are not clipped by that
+              # demarcation.
 
               headings = item.get(
                   "headings",
@@ -4312,7 +4479,17 @@ jobs:
                           "heading": heading,
                           "length_nm": length,
                           "polygon": Polygon(
-                              stub_polygon(
+                              asymmetric_stub_polygon(
+                                  item["lat"],
+                                  item["lon"],
+                                  heading,
+                                  length,
+                                  2.0,
+                                  5.0,
+                                  radius_nm,
+                              )
+                              if item.get("special") == "mildenhall"
+                              else stub_polygon(
                                   item["lat"],
                                   item["lon"],
                                   heading,
@@ -4323,6 +4500,103 @@ jobs:
                           ),
                       }
                   )
+
+
+          # --------------------------------------------------------
+          # Lakenheath / Mildenhall Note 5.
+          #
+          # NATS specifies a non-standard demarcation of the two
+          # 5 NM circles: their most easterly points are joined by a
+          # straight line.  Apply that rule to the two circle cores
+          # only, leaving the non-standard Mildenhall stubs intact.
+          # --------------------------------------------------------
+
+          laken = next(
+              item for item in MATZ
+              if item["name"] == "Lakenheath"
+          )
+
+          mild = next(
+              item for item in MATZ
+              if item["name"] == "Mildenhall"
+          )
+
+          laken_east = destination(
+              laken["lat"],
+              laken["lon"],
+              90.0,
+              laken.get("radius_nm", 5.0),
+          )
+
+          mild_east = destination(
+              mild["lat"],
+              mild["lon"],
+              90.0,
+              mild.get("radius_nm", 5.0),
+          )
+
+          west_of_demarcation = Polygon(
+              [
+                  [-180.0, -90.0],
+                  [mild_east[1], mild_east[0]],
+                  [laken_east[1], laken_east[0]],
+                  [-180.0, 90.0],
+                  [-180.0, -90.0],
+              ]
+          )
+
+          cmatz_core_indexes = [
+              index
+              for index, component in enumerate(components)
+              if (
+                  component["owner"]
+                  in {"Lakenheath", "Mildenhall"}
+                  and component["part"] == "core"
+              )
+          ]
+
+          if cmatz_core_indexes:
+
+              original_cmatz_core_union = unary_union(
+                  [
+                      components[index]["polygon"]
+                      for index in cmatz_core_indexes
+                  ]
+              )
+
+              cmatz_stub_union = unary_union(
+                  [
+                      component["polygon"]
+                      for component in components
+                      if (
+                          component["owner"]
+                          in {"Lakenheath", "Mildenhall"}
+                          and component["part"] == "stub"
+                      )
+                  ]
+              )
+
+              # Apply Note 5 to the circles, but never cut away the
+              # portion of a circle that is physically occupied by a
+              # CMATZ stub. This preserves a seamless circle-to-stub
+              # connection while the straight line remains the
+              # eastern demarcation of the two 5 NM circles.
+              cmatz_core_union = (
+                  original_cmatz_core_union
+                  .intersection(west_of_demarcation)
+                  .union(
+                      original_cmatz_core_union.intersection(
+                          cmatz_stub_union
+                      )
+                  )
+              )
+
+              # Keep both owner records so the final feature retains
+              # both Lakenheath and Mildenhall metadata, but give both
+              # cores the same Note 5-demarcated geometry.
+              for index in cmatz_core_indexes:
+                  components[index]["polygon"] = cmatz_core_union
+                  components[index]["part"] = "cmatz_core"
 
 
           # --------------------------------------------------------
@@ -4626,7 +4900,7 @@ jobs:
 
           print("")
           print(
-              "Stub rule: centreline follows published true heading; inner edge is placed where the 4 NM-wide stub intersects the MATZ circle."
+              "Stub rule: centreline follows published true heading; standard 4 NM-wide stubs intersect the MATZ circle; Mildenhall uses the NATS Note 4 asymmetric southern extension."
           )
 
           print(
