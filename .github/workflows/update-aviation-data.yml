@@ -3836,31 +3836,61 @@ jobs:
               bearing_deg,
               length_nm,
               width_nm,
-              start_distance_nm,
+              radius_nm,
           ):
               """
               Build a runway-aligned MATZ stub.
 
-              The inner edge starts on the OUTER edge of the MATZ
-              circle. It does not start at the runway midpoint.
+              The runway midpoint is the centre of the MATZ circle
+              and the stub centreline follows the published true
+              heading.
+
+              The stub is NOT started at the circle centre and it is
+              NOT started at a perpendicular line 5 NM from the
+              centre.  Its inner corners are placed exactly where a
+              rectangle of the published width intersects the MATZ
+              circle.  This makes the stub physically intersect the
+              circle with no gap.
+
+              The published stub length is measured outward from the
+              circle along its centreline.
               """
 
-              half_width = (
-                  width_nm / 2.0
+              half_width = width_nm / 2.0
+
+              if radius_nm <= half_width:
+                  raise ValueError(
+                      "MATZ radius must exceed half the stub width"
+                  )
+
+              # Distance along the runway/stub centreline from the
+              # runway midpoint to the two circle/stub intersection
+              # points.
+              #
+              # For a 5 NM circle and 4 NM-wide stub:
+              #
+              #   sqrt(5^2 - 2^2) = 4.582576 NM
+              #
+              # Starting the rectangle here makes its two inner
+              # corners lie exactly on the circle.
+              intersection_distance_nm = math.sqrt(
+                  radius_nm * radius_nm
+                  -
+                  half_width * half_width
               )
 
               start_lat, start_lon = destination(
                   lat,
                   lon,
                   bearing_deg,
-                  start_distance_nm,
+                  intersection_distance_nm,
               )
 
               end_lat, end_lon = destination(
                   lat,
                   lon,
                   bearing_deg,
-                  start_distance_nm + length_nm,
+                  intersection_distance_nm + length_nm,
               )
 
               start_left = destination(
@@ -4513,7 +4543,7 @@ jobs:
 
           print("")
           print(
-              "Stub rule: start at MATZ circle edge."
+              "Stub rule: inner corners intersect MATZ circle exactly; centreline follows published true heading."
           )
 
           print(
