@@ -1941,6 +1941,312 @@ jobs:
 
 
           # ========================================================
+          # GML ARCSTRING BY BULGE
+          #
+          # AIXM/GML may encode circular boundaries as ArcByBulge or
+          # ArcStringByBulge.  The <pos> values are control points,
+          # not straight polygon vertices.  Reconstruct the circular
+          # arc from the GML-defined midpoint and densify it.
+          # ========================================================
+
+          def vector_values(
+              element
+          ):
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "normal":
+                      continue
+
+                  values = number_list(
+                      node.text
+                      or
+                      ""
+                  )
+
+                  if len(values) >= 2:
+                      return values
+
+              return []
+
+
+          def arc_through_three_points(
+              start_point,
+              mid_point,
+              end_point
+          ):
+              ax, ay = start_point
+              bx, by = mid_point
+              cx, cy = end_point
+
+              denominator = (
+                  2.0
+                  *
+                  (
+                      ax * (by - cy)
+                      +
+                      bx * (cy - ay)
+                      +
+                      cx * (ay - by)
+                  )
+              )
+
+              if abs(denominator) < 1e-15:
+                  return [
+                      start_point,
+                      end_point
+                  ]
+
+              a2 = ax * ax + ay * ay
+              b2 = bx * bx + by * by
+              c2 = cx * cx + cy * cy
+
+              center_x = (
+                  a2 * (by - cy)
+                  +
+                  b2 * (cy - ay)
+                  +
+                  c2 * (ay - by)
+              ) / denominator
+
+              center_y = (
+                  a2 * (cx - bx)
+                  +
+                  b2 * (ax - cx)
+                  +
+                  c2 * (bx - ax)
+              ) / denominator
+
+              radius = math.hypot(
+                  ax - center_x,
+                  ay - center_y
+              )
+
+              if radius <= 0.0:
+                  return [
+                      start_point,
+                      end_point
+                  ]
+
+              start_angle = math.atan2(
+                  ay - center_y,
+                  ax - center_x
+              )
+
+              mid_angle = math.atan2(
+                  by - center_y,
+                  bx - center_x
+              )
+
+              end_angle = math.atan2(
+                  cy - center_y,
+                  cx - center_x
+              )
+
+              two_pi = 2.0 * math.pi
+
+              ccw_sweep = (
+                  end_angle
+                  -
+                  start_angle
+              ) % two_pi
+
+              ccw_to_mid = (
+                  mid_angle
+                  -
+                  start_angle
+              ) % two_pi
+
+              if (
+                  ccw_to_mid
+                  <=
+                  ccw_sweep
+                  +
+                  1e-10
+              ):
+                  sweep = ccw_sweep
+              else:
+                  sweep = -(
+                      two_pi
+                      -
+                      ccw_sweep
+                  )
+
+              if abs(sweep) < 1e-12:
+                  return [
+                      start_point,
+                      end_point
+                  ]
+
+              steps = max(
+                  2,
+                  min(
+                      720,
+                      int(
+                          math.ceil(
+                              abs(sweep)
+                              *
+                              180.0
+                              /
+                              math.pi
+                              /
+                              2.0
+                          )
+                      )
+                  )
+              )
+
+              result = []
+
+              for index in range(
+                  steps + 1
+              ):
+
+                  angle = (
+                      start_angle
+                      +
+                      (
+                          sweep
+                          *
+                          index
+                          /
+                          steps
+                      )
+                  )
+
+                  result.append(
+                      [
+                          center_x
+                          +
+                          radius
+                          *
+                          math.cos(angle),
+
+                          center_y
+                          +
+                          radius
+                          *
+                          math.sin(angle)
+                      ]
+                  )
+
+              result[0] = start_point
+              result[-1] = end_point
+
+              return result
+
+
+          def make_arc_by_bulge(
+              element
+          ):
+              points = extract_positions(
+                  element
+              )
+
+              if len(points) < 2:
+                  return []
+
+              bulges = []
+
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "bulge":
+                      continue
+
+                  if not node.text:
+                      continue
+
+                  try:
+                      bulges.append(
+                          float(
+                              node.text.strip()
+                          )
+                      )
+                  except ValueError:
+                      continue
+
+              if not bulges:
+                  return []
+
+              normals = []
+
+              for node in element.iter():
+
+                  if local(
+                      node.tag
+                  ) != "normal":
+                      continue
+
+                  values = vector_values(
+                      node
+                  )
+
+                  if len(values) >= 2:
+                      normals.append(
+                          values
+                      )
+
+              if not normals:
+                  return []
+
+              result = []
+
+              count = min(
+                  len(points) - 1,
+                  len(bulges),
+                  len(normals)
+              )
+
+              for index in range(count):
+
+                  start_point = points[index]
+                  end_point = points[index + 1]
+
+                  normal = normals[index]
+                  bulge = bulges[index]
+
+                  mid_point = [
+                      (
+                          start_point[0]
+                          +
+                          end_point[0]
+                      ) / 2.0
+                      +
+                      bulge * normal[0],
+
+                      (
+                          start_point[1]
+                          +
+                          end_point[1]
+                      ) / 2.0
+                      +
+                      bulge * normal[1]
+                  ]
+
+                  segment = (
+                      arc_through_three_points(
+                          start_point,
+                          mid_point,
+                          end_point
+                      )
+                  )
+
+                  if not result:
+                      result.extend(segment)
+
+                  elif result[-1] == segment[0]:
+                      result.extend(segment[1:])
+
+                  else:
+                      result.extend(segment)
+
+              return result if len(result) >= 2 else []
+
+
+          # ========================================================
           # ARC
           #
           # Bearings are clockwise from true north.
@@ -2155,6 +2461,27 @@ jobs:
               )
 
 
+              # Arc by bulge / ArcString by bulge.
+
+              for node in target.iter():
+
+                  name = local(
+                      node.tag
+                  )
+
+                  if name in {
+                      "ArcByBulge",
+                      "ArcStringByBulge"
+                  }:
+
+                      points = make_arc_by_bulge(
+                          node
+                      )
+
+                      if points:
+                          return points
+
+
               # Circle.
 
               for node in target.iter():
@@ -2214,9 +2541,7 @@ jobs:
                   if name in {
                       "LineStringSegment",
                       "GeodesicString",
-                      "Geodesic",
-                      "ArcString",
-                      "ArcStringByBulge"
+                      "Geodesic"
                   }:
 
                       points = extract_positions(
@@ -2261,14 +2586,21 @@ jobs:
               # This is the known-good/simple path.
               # ----------------------------------------------------
 
+              has_curve_members = any(
+                  local(node.tag) == "curveMember"
+                  for node in ring.iter()
+              )
+
               direct = extract_positions(
                   ring
               )
 
 
-              if len(
-                  direct
-              ) >= 4:
+              if (
+                  not has_curve_members
+                  and
+                  len(direct) >= 4
+              ):
 
                   if (
                       direct[0]
