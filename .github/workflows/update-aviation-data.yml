@@ -3945,6 +3945,90 @@ jobs:
               ]
 
 
+          def centred_rectangle(
+              lat,
+              lon,
+              bearing_deg,
+              length_nm,
+              width_nm,
+          ):
+              """
+              Build a rectangle centred on the supplied point.
+
+              Used for NATS' special Warton MATZ. The published
+              20 NM x 6 NM rectangle is centred 1 NM south of the
+              runway midpoint and aligned 071/251 true.
+              """
+
+              half_length = length_nm / 2.0
+              half_width = width_nm / 2.0
+
+              start_lat, start_lon = destination(
+                  lat,
+                  lon,
+                  bearing_deg + 180.0,
+                  half_length,
+              )
+
+              end_lat, end_lon = destination(
+                  lat,
+                  lon,
+                  bearing_deg,
+                  half_length,
+              )
+
+              start_left = destination(
+                  start_lat,
+                  start_lon,
+                  bearing_deg - 90.0,
+                  half_width,
+              )
+
+              start_right = destination(
+                  start_lat,
+                  start_lon,
+                  bearing_deg + 90.0,
+                  half_width,
+              )
+
+              end_left = destination(
+                  end_lat,
+                  end_lon,
+                  bearing_deg - 90.0,
+                  half_width,
+              )
+
+              end_right = destination(
+                  end_lat,
+                  end_lon,
+                  bearing_deg + 90.0,
+                  half_width,
+              )
+
+              return [
+                  [
+                      start_left[1],
+                      start_left[0],
+                  ],
+                  [
+                      start_right[1],
+                      start_right[0],
+                  ],
+                  [
+                      end_right[1],
+                      end_right[0],
+                  ],
+                  [
+                      end_left[1],
+                      end_left[0],
+                  ],
+                  [
+                      start_left[1],
+                      start_left[0],
+                  ],
+              ]
+
+
           MATZ =           [{'name': 'Barkston Heath',
             'lat': 52.9629833,
             'lon': -0.5603222,
@@ -4148,8 +4232,8 @@ jobs:
 
               name = item["name"]
 
-              # Warton: NATS Note 7, special 20 x 6 NM rectangle,
-              # major axis 071/251, offset 1 NM south of ARP.
+              # Warton: NATS Note 7, special 20 x 6 NM rectangle centred
+              # on a point 1 NM south of the ARP, major axis 071/251.
 
               if item.get("special") == "warton":
 
@@ -4165,13 +4249,12 @@ jobs:
                           "owner": name,
                           "part": "special_rectangle",
                           "polygon": Polygon(
-                              stub_polygon(
+                              centred_rectangle(
                                   offset_lat,
                                   offset_lon,
                                   71.0,
                                   20.0,
                                   6.0,
-                                  0.0,
                               )
                           ),
                       }
@@ -4543,7 +4626,7 @@ jobs:
 
           print("")
           print(
-              "Stub rule: inner corners intersect MATZ circle exactly; centreline follows published true heading."
+              "Stub rule: centreline follows published true heading; inner edge is placed where the 4 NM-wide stub intersects the MATZ circle."
           )
 
           print(
