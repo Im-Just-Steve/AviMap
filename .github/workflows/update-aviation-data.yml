@@ -2993,64 +2993,6 @@ jobs:
 
 
               # ----------------------------------------------------
-              # ATZ / MATZ diagnostics
-              # ----------------------------------------------------
-
-              combined = (
-                  f"{airspace_type} "
-                  f"{local_type} "
-                  f"{designator} "
-                  f"{name}"
-              ).upper()
-
-
-              if (
-                  "ATZ" in combined
-                  or
-                  "MATZ" in combined
-              ):
-
-                  print("")
-                  print(
-                      "SPECIAL AIRSPACE:"
-                  )
-
-                  print(
-                      "Index:",
-                      index
-                  )
-
-                  print(
-                      "Designator:",
-                      designator
-                  )
-
-                  print(
-                      "Name:",
-                      name
-                  )
-
-                  print(
-                      "Type:",
-                      airspace_type
-                  )
-
-                  print(
-                      "LocalType:",
-                      local_type
-                  )
-
-                  print(
-                      "Geometry:",
-                      (
-                          "YES"
-                          if geometry is not None
-                          else
-                          "NO"
-                      )
-                  )
-
-
           # ========================================================
           # WRITE GEOJSON
           # ========================================================
@@ -3683,30 +3625,6 @@ jobs:
       # ============================================================
 
       # ============================================================
-      # MATZ / CMATZ GEOMETRY — CHART REPRODUCTION
-      #
-      # This layer is a fixed visual chart reproduction.
-      #
-      # The geometry is a fixed visual reproduction of the MATZ
-      # symbols shown on UK MIL AIP ENR 6-17:
-      #
-      #   - 5 NM circle centred on the aerodrome/runway symbol
-      #   - runway/stub rectangle aligned with the displayed runway
-      #     heading
-      #   - 4 NM rectangle width
-      #   - 5 NM stub length outside the circle
-      #   - the stub joins the circle at the two circle/intersection
-      #     points, producing one continuous outline
-      #   - reciprocal headings produce the two-sided runway/stub
-      #     appearance shown on the chart
-      #
-      # Overlapping symbols are unioned into one exterior outline so
-      # that there are no internal polygon boundaries.
-      #
-      # The chart itself is the geometry reference. This is intentional
-      # for AviMap's MSFS/simulation use case.
-      # ============================================================
-
       - name: Validate generated aviation data
         run: |
           set -euo pipefail
@@ -3743,10 +3661,6 @@ jobs:
           )
 
 
-            jq \
-              '.features | length' \
-              "${MATZ}"
-          )
 
 
           VRP_COUNT=$(
@@ -3784,7 +3698,6 @@ jobs:
           echo "${VRP_COUNT}"
 
           echo ""
-          echo "ENR 6-17 MATZ / CMATZ features:"
 
           echo ""
 
@@ -3913,7 +3826,7 @@ jobs:
 
 
           git commit \
-            -m "Reproduce ENR 6-17 MATZ and CMATZ chart geometry"
+            -m "Update NATS aviation data"
 
 
           git push
