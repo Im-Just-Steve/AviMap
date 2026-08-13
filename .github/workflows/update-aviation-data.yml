@@ -4566,7 +4566,8 @@ jobs:
 
           ls -lh \
             data/uk-airspace.geojson \
-            data/uk-reporting-points.geojson
+            data/uk-reporting-points.geojson \
+            data/uk-matz.geojson
 
 
       # ============================================================
@@ -4590,7 +4591,8 @@ jobs:
 
           git add \
             data/uk-airspace.geojson \
-            data/uk-reporting-points.geojson
+            data/uk-reporting-points.geojson \
+            data/uk-matz.geojson
 
 
           if git diff --cached --quiet; then
@@ -4612,7 +4614,7 @@ jobs:
 
 
           git commit \
-            -m "Improve NATS AIXM geometry import"
+            -m "Add hard-coded NATS MATZ and CMATZ data"
 
 
           git push
